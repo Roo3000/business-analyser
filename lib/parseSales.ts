@@ -14,7 +14,7 @@ export function parseSalesFile(file: File): Promise<SalesRow[]> {
 
         const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, {
           defval: "",
-          raw: false, // important - gives us formatted strings when possible
+          raw: false,
         });
 
         if (jsonData.length === 0) {
@@ -23,7 +23,7 @@ export function parseSalesFile(file: File): Promise<SalesRow[]> {
         }
 
         const rows: SalesRow[] = jsonData.map((row, index) => {
-          // Try multiple possible column names for date
+          // ----- Date -----
           let rawDate =
             row["Date"] ||
             row["date"] ||
@@ -32,18 +32,17 @@ export function parseSalesFile(file: File): Promise<SalesRow[]> {
             row["OrderDate"] ||
             "";
 
-          // Convert to a clean string in YYYY-MM-DD format when possible
           let dateStr = "";
           if (rawDate instanceof Date) {
             dateStr = rawDate.toISOString().split("T")[0];
           } else if (typeof rawDate === "number") {
-            // Excel serial number
             const excelDate = new Date(Math.round((rawDate - 25569) * 86400 * 1000));
             dateStr = excelDate.toISOString().split("T")[0];
           } else {
             dateStr = String(rawDate).trim();
           }
 
+          // ----- Other fields -----
           const orderId =
             row["Order ID"] ||
             row["OrderID"] ||
@@ -80,6 +79,35 @@ export function parseSalesFile(file: File): Promise<SalesRow[]> {
                 row["Amount"]
             ) || quantity * unitPrice;
 
+          // ----- NEW: Cost -----
+          // Accepts "Cost", "Unit Cost", "COGS", "Purchase Cost", etc.
+          // If the column is unit cost, we multiply by quantity
+          let cost: number | undefined = undefined;
+          const rawCost =
+            row["Cost"] ||
+            row["cost"] ||
+            row["Unit Cost"] ||
+            row["unit_cost"] ||
+            row["COGS"] ||
+            row["cogs"] ||
+            row["Purchase Cost"] ||
+            row["purchase_cost"];
+
+          if (rawCost !== undefined && rawCost !== "") {
+            const costValue = Number(rawCost);
+            if (!isNaN(costValue)) {
+              // If the column name suggests unit cost, multiply by quantity
+              const isUnitCost =
+                String(
+                  Object.keys(row).find((k) =>
+                    ["Unit Cost", "unit_cost", "UnitCost"].includes(k)
+                  ) || ""
+                ).length > 0;
+
+              cost = isUnitCost ? costValue * quantity : costValue;
+            }
+          }
+
           const customer =
             row["Customer"] ||
             row["customer"] ||
@@ -94,6 +122,7 @@ export function parseSalesFile(file: File): Promise<SalesRow[]> {
             quantity: isNaN(quantity) ? 1 : quantity,
             unitPrice: isNaN(unitPrice) ? 0 : unitPrice,
             revenue: isNaN(revenue) ? 0 : revenue,
+            cost: cost,
             customer: customer ? String(customer) : undefined,
           };
         });
