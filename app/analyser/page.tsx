@@ -39,6 +39,7 @@ import {
   Legend,
   Area,
   AreaChart,
+  Cell,
 } from "recharts";
 
 const CURRENCIES = [
@@ -54,6 +55,7 @@ type CurrencyCode = (typeof CURRENCIES)[number]["code"];
 export default function AnalyserPage() {
   const [rows, setRows] = useState<SalesRow[]>([]);
   const [stats, setStats] = useState<RevenueStats | null>(null);
+  const [previousStats, setPreviousStats] = useState<RevenueStats | null>(null);
   const [projection, setProjection] = useState<RevenueProjection | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,13 +70,16 @@ export default function AnalyserPage() {
   const [endDate, setEndDate] = useState<string>("");
   const [currency, setCurrency] = useState<CurrencyCode>("USD");
   const [sourceCurrency, setSourceCurrency] = useState<CurrencyCode>("USD");
+  const [selectedProduct, setSelectedProduct] = useState<string | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
   const [rates, setRates] = useState<Record<string, number>>({ USD: 1 });
   const [ratesLoading, setRatesLoading] = useState(false);
   const [lang, setLang] = useState<Lang>("en");
 
   const t = translations[lang];
 
-    // Approximate static rates (used as fallback / offline)
+  // Approximate static rates (used as fallback / offline)
+  // Values are "1 unit of base → how many of this currency"
   const STATIC_RATES: Record<CurrencyCode, Record<CurrencyCode, number>> = {
     USD: { USD: 1, EUR: 0.92, GBP: 0.79, CAD: 1.36, XOF: 600 },
     EUR: { USD: 1.09, EUR: 1, GBP: 0.86, CAD: 1.48, XOF: 655 },
@@ -83,6 +88,7 @@ export default function AnalyserPage() {
     XOF: { USD: 0.00167, EUR: 0.00153, GBP: 0.00132, CAD: 0.00227, XOF: 1 },
   };
 
+  // Fetch live rates when possible; fall back to static rates on failure
   const fetchRates = useCallback(async (base: CurrencyCode) => {
     setRatesLoading(true);
     try {
@@ -92,13 +98,14 @@ export default function AnalyserPage() {
       );
       if (!res.ok) throw new Error("Rate API unavailable");
       const data = await res.json();
+      // Merge with static so XOF (unsupported by frankfurter) still works
       setRates({
         ...STATIC_RATES[base],
         [base]: 1,
         ...data.rates,
       });
     } catch {
-      // Silent fallback — no crash
+      // Silent fallback — no console error, no crash
       setRates(STATIC_RATES[base] || { USD: 1, EUR: 1, GBP: 1, CAD: 1, XOF: 1 });
     } finally {
       setRatesLoading(false);
@@ -114,10 +121,15 @@ export default function AnalyserPage() {
     days: number,
     method: ProjectionMethod,
     start: string,
-    end: string
+    end: string,
+    product: string | null = null
   ) => {
+    let working = sourceRows;
+    if (product) {
+      working = working.filter((r) => r.product === product);
+    }
     const filtered = filterRowsByDate(
-      sourceRows,
+      working,
       start || null,
       end || null
     );
@@ -125,6 +137,21 @@ export default function AnalyserPage() {
     const calculatedProjection = projectRevenue(filtered, days, method);
     setStats(calculatedStats);
     setProjection(calculatedProjection);
+
+    // Previous period of the same length (for comparison)
+    if (start && end) {
+      const startD = new Date(start);
+      const endD = new Date(end);
+      const lengthMs = endD.getTime() - startD.getTime();
+      const prevEnd = new Date(startD.getTime() - 24 * 60 * 60 * 1000); // day before start
+      const prevStart = new Date(prevEnd.getTime() - lengthMs);
+      const prevStartStr = prevStart.toISOString().slice(0, 10);
+      const prevEndStr = prevEnd.toISOString().slice(0, 10);
+      const prevFiltered = filterRowsByDate(sourceRows, prevStartStr, prevEndStr);
+      setPreviousStats(calculateRevenueStats(prevFiltered));
+    } else {
+      setPreviousStats(null);
+    }
   };
 
   const handleFile = async (file: File) => {
@@ -133,11 +160,13 @@ export default function AnalyserPage() {
     setFileName(file.name);
     setStartDate("");
     setEndDate("");
+    setSelectedProduct(null);
+    setSelectedCustomer(null);
 
     try {
       const parsedRows = await parseSalesFile(file);
       setRows(parsedRows);
-      processData(parsedRows, projectionDays, projectionMethod, "", "");
+      processData(parsedRows, projectionDays, projectionMethod, "", "", null);
     } catch (err: any) {
       setError(err.message || "Failed to process the file");
       setRows([]);
@@ -163,10 +192,11 @@ export default function AnalyserPage() {
     days = projectionDays,
     method = projectionMethod,
     start = startDate,
-    end = endDate
+    end = endDate,
+    product: string | null = selectedProduct
   ) => {
     if (rows.length > 0) {
-      processData(rows, days, method, start, end);
+      processData(rows, days, method, start, end, product);
     }
   };
 
@@ -188,6 +218,48 @@ export default function AnalyserPage() {
     setStartDate("");
     setEndDate("");
     reprocess(projectionDays, projectionMethod, "", "");
+  };
+
+  const setPreset = (preset: "7d" | "30d" | "thisMonth" | "lastMonth" | "all") => {
+    if (!stats?.dateRange.max && preset !== "all") {
+      // If no stats yet, try using rows
+      if (rows.length === 0) return;
+    }
+
+    const maxStr = stats?.dateRange.max;
+    if (!maxStr && preset !== "all") return;
+
+    if (preset === "all") {
+      setStartDate("");
+      setEndDate("");
+      reprocess(projectionDays, projectionMethod, "", "");
+      return;
+    }
+
+    const max = new Date(maxStr!);
+    let start = "";
+    let end = maxStr!;
+
+    if (preset === "7d") {
+      const d = new Date(max);
+      d.setDate(d.getDate() - 6);
+      start = d.toISOString().slice(0, 10);
+    } else if (preset === "30d") {
+      const d = new Date(max);
+      d.setDate(d.getDate() - 29);
+      start = d.toISOString().slice(0, 10);
+    } else if (preset === "thisMonth") {
+      start = `${max.getFullYear()}-${String(max.getMonth() + 1).padStart(2, "0")}-01`;
+    } else if (preset === "lastMonth") {
+      const d = new Date(max.getFullYear(), max.getMonth() - 1, 1);
+      start = d.toISOString().slice(0, 10);
+      const lastDay = new Date(max.getFullYear(), max.getMonth(), 0);
+      end = lastDay.toISOString().slice(0, 10);
+    }
+
+    setStartDate(start);
+    setEndDate(end);
+    reprocess(projectionDays, projectionMethod, start, end);
   };
 
   const currencyInfo = CURRENCIES.find((c) => c.code === currency) || CURRENCIES[0];
@@ -212,6 +284,11 @@ export default function AnalyserPage() {
   const formatPercent = (value: number | null) =>
     value === null ? "N/A" : `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 
+  const deltaPct = (current: number, previous: number): number | null => {
+    if (previous === 0) return current === 0 ? 0 : null;
+    return ((current - previous) / previous) * 100;
+  };
+
   const chartData = useMemo(() => {
     if (!stats || !projection) return [];
 
@@ -229,6 +306,123 @@ export default function AnalyserPage() {
 
     return [...historical, ...projected];
   }, [stats, projection]);
+
+  // All product names (from full dataset, for the filter dropdown)
+  const allProducts = useMemo(() => {
+    const set = new Set<string>();
+    rows.forEach((r) => set.add(r.product));
+    return Array.from(set).sort();
+  }, [rows]);
+
+  // Orders for the selected customer (respects current date/product filters via rows+stats path)
+  const customerOrders = useMemo(() => {
+    if (!selectedCustomer) return [];
+    let list = rows.filter((r) => r.customer === selectedCustomer);
+    if (selectedProduct) {
+      list = list.filter((r) => r.product === selectedProduct);
+    }
+    // Apply date filter if set
+    if (startDate || endDate) {
+      list = filterRowsByDate(list, startDate || null, endDate || null);
+    }
+    return list.sort((a, b) => b.date.localeCompare(a.date));
+  }, [rows, selectedCustomer, selectedProduct, startDate, endDate]);
+
+  // Auto-generated insights
+  const insights = useMemo(() => {
+    if (!stats || stats.totalOrders === 0) return [];
+
+    const items: { text: string; type: "positive" | "negative" | "neutral" }[] = [];
+    const isFr = lang === "fr";
+
+    // 1. Period comparison
+    if (previousStats && previousStats.totalRevenue > 0) {
+      const pct =
+        ((stats.totalRevenue - previousStats.totalRevenue) /
+          previousStats.totalRevenue) *
+        100;
+      if (Math.abs(pct) >= 1) {
+        items.push({
+          type: pct >= 0 ? "positive" : "negative",
+          text: isFr
+            ? `CA ${pct >= 0 ? "en hausse" : "en baisse"} de ${Math.abs(pct).toFixed(1)}% vs période précédente`
+            : `Revenue ${pct >= 0 ? "up" : "down"} ${Math.abs(pct).toFixed(1)}% vs previous period`,
+        });
+      }
+    }
+
+    // 2. Top product concentration
+    if (stats.topProducts.length > 0 && stats.totalRevenue > 0) {
+      const top = stats.topProducts[0];
+      const share = (top.revenue / stats.totalRevenue) * 100;
+      if (share >= 25) {
+        items.push({
+          type: share >= 40 ? "negative" : "neutral",
+          text: isFr
+            ? `"${top.product}" représente ${share.toFixed(0)}% du CA`
+            : `"${top.product}" drives ${share.toFixed(0)}% of revenue`,
+        });
+      }
+    }
+
+    // 3. Negative margin products
+    const losers = stats.topProducts.filter(
+      (p) => p.margin !== null && p.margin < 0
+    );
+    if (losers.length > 0) {
+      items.push({
+        type: "negative",
+        text: isFr
+          ? `${losers.length} produit${losers.length > 1 ? "s" : ""} à marge négative (ex: ${losers[0].product})`
+          : `${losers.length} product${losers.length > 1 ? "s" : ""} with negative margin (e.g. ${losers[0].product})`,
+      });
+    }
+
+    // 4. Overall margin
+    if (stats.profitMargin !== null) {
+      if (stats.profitMargin < 10) {
+        items.push({
+          type: "negative",
+          text: isFr
+            ? `Marge globale faible: ${stats.profitMargin.toFixed(1)}%`
+            : `Low overall margin: ${stats.profitMargin.toFixed(1)}%`,
+        });
+      } else if (stats.profitMargin >= 30) {
+        items.push({
+          type: "positive",
+          text: isFr
+            ? `Bonne marge globale: ${stats.profitMargin.toFixed(1)}%`
+            : `Healthy overall margin: ${stats.profitMargin.toFixed(1)}%`,
+        });
+      }
+    }
+
+    // 5. Growth rate
+    if (stats.growthRate !== null && Math.abs(stats.growthRate) >= 5) {
+      items.push({
+        type: stats.growthRate >= 0 ? "positive" : "negative",
+        text: isFr
+          ? `Croissance mensuelle: ${stats.growthRate >= 0 ? "+" : ""}${stats.growthRate.toFixed(1)}%`
+          : `Month-over-month growth: ${stats.growthRate >= 0 ? "+" : ""}${stats.growthRate.toFixed(1)}%`,
+      });
+    }
+
+    // 6. Top customer concentration
+    if (stats.topCustomers.length > 0 && stats.totalRevenue > 0) {
+      const topC = stats.topCustomers[0];
+      const share = (topC.revenue / stats.totalRevenue) * 100;
+      if (share >= 30) {
+        items.push({
+          type: "neutral",
+          text: isFr
+            ? `Client principal "${topC.customer}": ${share.toFixed(0)}% du CA`
+            : `Top customer "${topC.customer}": ${share.toFixed(0)}% of revenue`,
+        });
+      }
+    }
+
+    return items.slice(0, 6);
+  }, [stats, previousStats, lang]);
 
   const exportCsv = () => {
     if (!stats) return;
@@ -442,6 +636,27 @@ export default function AnalyserPage() {
                     {t.dataSpans} {stats.dateRange.min} → {stats.dateRange.max}
                   </p>
                 )}
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {[
+                    { id: "7d", label: lang === "fr" ? "7 jours" : "7 days" },
+                    { id: "30d", label: lang === "fr" ? "30 jours" : "30 days" },
+                    { id: "thisMonth", label: lang === "fr" ? "Ce mois" : "This month" },
+                    { id: "lastMonth", label: lang === "fr" ? "Mois dernier" : "Last month" },
+                    { id: "all", label: lang === "fr" ? "Tout" : "All time" },
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() =>
+                        setPreset(
+                          p.id as "7d" | "30d" | "thisMonth" | "lastMonth" | "all"
+                        )
+                      }
+                      className="text-xs px-2.5 py-1 rounded-full border border-slate-300 hover:bg-slate-100 text-slate-600"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="flex items-center gap-3">
@@ -490,6 +705,36 @@ export default function AnalyserPage() {
                   <option value="seasonal">{t.methodSeasonal}</option>
                   <option value="trend">{t.methodTrend}</option>
                   <option value="average">{t.methodAverage}</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <label className="text-sm font-medium text-slate-600">
+                  {lang === "fr" ? "Produit" : "Product"}:
+                </label>
+                <select
+                  value={selectedProduct ?? ""}
+                  onChange={(e) => {
+                    const val = e.target.value || null;
+                    setSelectedProduct(val);
+                    reprocess(
+                      projectionDays,
+                      projectionMethod,
+                      startDate,
+                      endDate,
+                      val
+                    );
+                  }}
+                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[180px]"
+                >
+                  <option value="">
+                    {lang === "fr" ? "Tous" : "All products"}
+                  </option>
+                  {allProducts.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -559,6 +804,97 @@ export default function AnalyserPage() {
                 color="blue"
               />
             </div>
+
+            {/* Auto insights */}
+            {insights.length > 0 && (
+              <div className="bg-white rounded-2xl border border-slate-200 p-6">
+                <h2 className="font-semibold text-lg mb-4">
+                  {lang === "fr" ? "Points clés" : "Key insights"}
+                </h2>
+                <ul className="space-y-2">
+                  {insights.map((item, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm">
+                      <span
+                        className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${
+                          item.type === "positive"
+                            ? "bg-emerald-500"
+                            : item.type === "negative"
+                            ? "bg-rose-500"
+                            : "bg-slate-400"
+                        }`}
+                      />
+                      <span className="text-slate-700">{item.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Period comparison */}
+            {previousStats && previousStats.totalOrders > 0 && (
+              <div className="bg-white rounded-2xl border border-slate-200 p-6">
+                <h2 className="font-semibold text-lg mb-4">
+                  {lang === "fr" ? "Comparaison avec la période précédente" : "vs Previous Period"}
+                </h2>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  {[
+                    {
+                      label: t.totalRevenue,
+                      current: stats.totalRevenue,
+                      previous: previousStats.totalRevenue,
+                    },
+                    {
+                      label: t.totalOrders,
+                      current: stats.totalOrders,
+                      previous: previousStats.totalOrders,
+                      isCount: true,
+                    },
+                    {
+                      label: t.avgOrderValue,
+                      current: stats.averageOrderValue,
+                      previous: previousStats.averageOrderValue,
+                    },
+                    {
+                      label: t.totalProfit,
+                      current: stats.totalProfit,
+                      previous: previousStats.totalProfit,
+                    },
+                  ].map((item) => {
+                    const pct = deltaPct(item.current, item.previous);
+                    const up = pct !== null && pct >= 0;
+                    return (
+                      <div
+                        key={item.label}
+                        className="rounded-xl border border-slate-100 p-4"
+                      >
+                        <p className="text-xs text-slate-500 mb-1">{item.label}</p>
+                        <p className="text-lg font-bold">
+                          {item.isCount
+                            ? item.current.toLocaleString()
+                            : formatCurrency(item.current)}
+                        </p>
+                        <p
+                          className={`text-sm mt-1 font-medium ${
+                            pct === null
+                              ? "text-slate-400"
+                              : up
+                              ? "text-emerald-600"
+                              : "text-rose-600"
+                          }`}
+                        >
+                          {pct === null
+                            ? "—"
+                            : `${up ? "▲" : "▼"} ${Math.abs(pct).toFixed(1)}%`}
+                          <span className="text-slate-400 font-normal ml-1">
+                            {lang === "fr" ? "vs préc." : "vs prev"}
+                          </span>
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Revenue + Projection Chart */}
             {chartData.length > 0 && (
@@ -658,6 +994,95 @@ export default function AnalyserPage() {
               </div>
             )}
 
+            {/* Monthly revenue + Profit by product */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Monthly bars */}
+              {stats.revenueByPeriod.length > 0 && (
+                <div className="bg-white rounded-2xl border border-slate-200 p-6">
+                  <h2 className="font-semibold text-lg mb-4">
+                    {t.monthlyRevenue}
+                  </h2>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={stats.revenueByPeriod}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis
+                          dataKey="period"
+                          tick={{ fontSize: 11 }}
+                          tickFormatter={(v) => v.slice(2)} // YY-MM
+                        />
+                        <YAxis
+                          tick={{ fontSize: 11 }}
+                          tickFormatter={(v) =>
+                            v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`
+                          }
+                        />
+                        <Tooltip
+                          formatter={(value: number) => formatCurrency(value)}
+                        />
+                        <Bar
+                          dataKey="revenue"
+                          name={t.revenue}
+                          fill="#2563eb"
+                          radius={[4, 4, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+
+              {/* Profit by product */}
+              {stats.topProducts.some((p) => p.cost > 0 || p.profit !== 0) && (
+                <div className="bg-white rounded-2xl border border-slate-200 p-6">
+                  <h2 className="font-semibold text-lg mb-4">
+                    {lang === "fr" ? "Profit par produit" : "Profit by product"}
+                  </h2>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={stats.topProducts.slice(0, topN)}
+                        layout="vertical"
+                        margin={{ left: 20, right: 20 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis
+                          type="number"
+                          tick={{ fontSize: 11 }}
+                          tickFormatter={(v) =>
+                            v >= 1000 || v <= -1000
+                              ? `${(v / 1000).toFixed(0)}k`
+                              : `${v}`
+                          }
+                        />
+                        <YAxis
+                          type="category"
+                          dataKey="product"
+                          width={100}
+                          tick={{ fontSize: 11 }}
+                        />
+                        <Tooltip
+                          formatter={(value: number) => formatCurrency(value)}
+                        />
+                        <Bar
+                          dataKey="profit"
+                          name={t.profit}
+                          radius={[0, 4, 4, 0]}
+                        >
+                          {stats.topProducts.slice(0, topN).map((entry, i) => (
+                            <Cell
+                              key={i}
+                              fill={entry.profit >= 0 ? "#059669" : "#e11d48"}
+                            />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Product Cost Breakdown */}
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
               <div className="px-6 py-4 border-b border-slate-100">
@@ -692,7 +1117,32 @@ export default function AnalyserPage() {
                     {stats.topProducts.slice(0, topN).map((item, index) => (
                       <tr key={item.product}>
                         <td className="px-6 py-3 text-slate-400">{index + 1}</td>
-                        <td className="px-6 py-3 font-medium">{item.product}</td>
+                        <td className="px-6 py-3 font-medium">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next =
+                                selectedProduct === item.product
+                                  ? null
+                                  : item.product;
+                              setSelectedProduct(next);
+                              reprocess(
+                                projectionDays,
+                                projectionMethod,
+                                startDate,
+                                endDate,
+                                next
+                              );
+                            }}
+                            className={`text-left hover:underline ${
+                              selectedProduct === item.product
+                                ? "text-blue-600"
+                                : ""
+                            }`}
+                          >
+                            {item.product}
+                          </button>
+                        </td>
                         <td className="px-6 py-3 text-right">{item.quantity}</td>
                         <td className="px-6 py-3 text-right">
                           {formatCurrency(item.revenue)}
@@ -783,9 +1233,23 @@ export default function AnalyserPage() {
                           <span className="text-slate-400 text-sm w-5">
                             {index + 1}
                           </span>
-                          <span className="font-medium text-sm">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedCustomer(
+                                selectedCustomer === item.customer
+                                  ? null
+                                  : item.customer
+                              )
+                            }
+                            className={`font-medium text-sm text-left hover:underline ${
+                              selectedCustomer === item.customer
+                                ? "text-blue-600"
+                                : ""
+                            }`}
+                          >
                             {item.customer}
-                          </span>
+                          </button>
                         </div>
                         <div className="text-right">
                           <span className="font-semibold text-slate-700 text-sm">
@@ -802,6 +1266,99 @@ export default function AnalyserPage() {
                 )}
               </div>
             </div>
+
+            {/* Customer detail */}
+            {selectedCustomer && (
+              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                  <h2 className="font-semibold text-lg">
+                    {lang === "fr" ? "Détail client" : "Customer detail"}:{" "}
+                    <span className="text-blue-600">{selectedCustomer}</span>
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCustomer(null)}
+                    className="text-sm text-slate-500 hover:text-slate-800 underline"
+                  >
+                    {lang === "fr" ? "Fermer" : "Close"}
+                  </button>
+                </div>
+                {customerOrders.length === 0 ? (
+                  <div className="px-6 py-8 text-center text-slate-500 text-sm">
+                    {lang === "fr"
+                      ? "Aucune commande pour ce client sur la période."
+                      : "No orders for this customer in the selected period."}
+                  </div>
+                ) : (
+                  <>
+                    <div className="px-6 py-3 bg-slate-50 flex flex-wrap gap-6 text-sm border-b border-slate-100">
+                      <div>
+                        <span className="text-slate-500">
+                          {lang === "fr" ? "Commandes" : "Orders"}:{" "}
+                        </span>
+                        <span className="font-semibold">
+                          {customerOrders.length}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">{t.totalRevenue}: </span>
+                        <span className="font-semibold">
+                          {formatCurrency(
+                            customerOrders.reduce((s, r) => s + r.revenue, 0)
+                          )}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">
+                          {lang === "fr" ? "Dernière commande" : "Last order"}:{" "}
+                        </span>
+                        <span className="font-semibold">
+                          {customerOrders[0]?.date}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto max-h-80">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-white">
+                          <tr className="text-left text-slate-500 border-b border-slate-100">
+                            <th className="px-6 py-2 font-medium">Date</th>
+                            <th className="px-6 py-2 font-medium">
+                              {lang === "fr" ? "Commande" : "Order"}
+                            </th>
+                            <th className="px-6 py-2 font-medium">
+                              {lang === "fr" ? "Produit" : "Product"}
+                            </th>
+                            <th className="px-6 py-2 font-medium text-right">
+                              {t.qty}
+                            </th>
+                            <th className="px-6 py-2 font-medium text-right">
+                              {t.revenue}
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {customerOrders.map((o, i) => (
+                            <tr key={`${o.orderId}-${i}`}>
+                              <td className="px-6 py-2">{o.date}</td>
+                              <td className="px-6 py-2 text-slate-600">
+                                {o.orderId}
+                              </td>
+                              <td className="px-6 py-2">{o.product}</td>
+                              <td className="px-6 py-2 text-right">
+                                {o.quantity}
+                              </td>
+                              <td className="px-6 py-2 text-right font-medium">
+                                {formatCurrency(o.revenue)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             {/* Monthly breakdown */}
             {stats.revenueByPeriod.length > 0 && (
