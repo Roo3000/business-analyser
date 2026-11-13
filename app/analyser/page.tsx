@@ -4,7 +4,18 @@ import { useState } from "react";
 import { parseSalesFile } from "@/lib/parseSales";
 import { calculateRevenueStats, projectRevenue } from "@/lib/analyseSales";
 import { SalesRow, RevenueStats, RevenueProjection } from "@/types/sales";
-import { Upload, FileSpreadsheet, TrendingUp, DollarSign, ShoppingCart, BarChart3 } from "lucide-react";
+import {
+  Upload,
+  FileSpreadsheet,
+  TrendingUp,
+  DollarSign,
+  ShoppingCart,
+  BarChart3,
+  Wallet,
+  PiggyBank,
+  Percent,
+  CalendarDays,
+} from "lucide-react";
 
 export default function AnalyserPage() {
   const [rows, setRows] = useState<SalesRow[]>([]);
@@ -55,6 +66,9 @@ export default function AnalyserPage() {
       maximumFractionDigits: 0,
     }).format(value);
 
+  const formatPercent = (value: number | null) =>
+    value === null ? "N/A" : `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       {/* Header */}
@@ -66,7 +80,7 @@ export default function AnalyserPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold tracking-tight">Business Analyser</h1>
-              <p className="text-sm text-slate-500">Sales & Revenue Insights</p>
+              <p className="text-sm text-slate-500">Sales, Cost & Profit Insights</p>
             </div>
           </div>
         </div>
@@ -86,7 +100,7 @@ export default function AnalyserPage() {
             <div>
               <p className="text-lg font-medium">Drop your sales file here</p>
               <p className="text-slate-500 text-sm mt-1">
-                Supports CSV and Excel (.xlsx, .xls)
+                Supports CSV and Excel (.xlsx, .xls) — include a Cost column for profit analysis
               </p>
             </div>
 
@@ -113,9 +127,7 @@ export default function AnalyserPage() {
 
         {/* Loading */}
         {loading && (
-          <div className="mt-10 text-center text-slate-600">
-            Processing your file...
-          </div>
+          <div className="mt-10 text-center text-slate-600">Processing your file...</div>
         )}
 
         {/* Error */}
@@ -128,7 +140,7 @@ export default function AnalyserPage() {
         {/* Results */}
         {stats && !loading && (
           <div className="mt-12 space-y-10">
-            {/* Key Metrics */}
+            {/* Row 1: Core Revenue Metrics */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
               <MetricCard
                 title="Total Revenue"
@@ -150,15 +162,76 @@ export default function AnalyserPage() {
               />
               <MetricCard
                 title="Growth Rate"
-                value={
-                  stats.growthRate !== null
-                    ? `${stats.growthRate > 0 ? "+" : ""}${stats.growthRate.toFixed(1)}%`
-                    : "N/A"
-                }
+                value={formatPercent(stats.growthRate)}
                 icon={<BarChart3 size={20} />}
                 color={stats.growthRate && stats.growthRate >= 0 ? "emerald" : "rose"}
               />
             </div>
+
+            {/* Row 2: Cost & Profit Metrics */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              <MetricCard
+                title="Total Cost"
+                value={formatCurrency(stats.totalCost)}
+                icon={<Wallet size={20} />}
+                color="amber"
+              />
+              <MetricCard
+                title="Total Profit"
+                value={formatCurrency(stats.totalProfit)}
+                icon={<PiggyBank size={20} />}
+                color={stats.totalProfit >= 0 ? "emerald" : "rose"}
+              />
+              <MetricCard
+                title="Profit Margin"
+                value={
+                  stats.profitMargin !== null
+                    ? `${stats.profitMargin.toFixed(1)}%`
+                    : "N/A"
+                }
+                icon={<Percent size={20} />}
+                color={stats.profitMargin && stats.profitMargin >= 0 ? "emerald" : "rose"}
+              />
+              <MetricCard
+                title="Avg Daily Revenue"
+                value={formatCurrency(stats.averageDailyRevenue)}
+                icon={<CalendarDays size={20} />}
+                color="blue"
+              />
+            </div>
+
+            {/* Projection + Comparison */}
+            {projection && (
+              <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6">
+                <h2 className="font-semibold text-lg text-blue-900 mb-1">
+                  30-Day Revenue Projection
+                </h2>
+                <p className="text-blue-700 text-sm mb-5">{projection.method}</p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                  <div>
+                    <p className="text-sm text-blue-600 mb-1">Current Avg Daily Revenue</p>
+                    <p className="text-2xl font-bold text-blue-900">
+                      {formatCurrency(stats.averageDailyRevenue)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-blue-600 mb-1">Projected Daily Revenue</p>
+                    <p className="text-2xl font-bold text-blue-900">
+                      {formatCurrency(projection.averageDailyRevenue)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-blue-600 mb-1">Estimated 30-Day Total</p>
+                    <p className="text-2xl font-bold text-blue-900">
+                      {formatCurrency(
+                        projection.projectedRevenue.reduce((sum, d) => sum + d.revenue, 0)
+                      )}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Top Products */}
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
@@ -175,31 +248,20 @@ export default function AnalyserPage() {
                       <span className="text-slate-400 text-sm w-5">{index + 1}</span>
                       <span className="font-medium">{item.product}</span>
                     </div>
-                    <span className="font-semibold text-slate-700">
-                      {formatCurrency(item.revenue)}
-                    </span>
+                    <div className="text-right">
+                      <span className="font-semibold text-slate-700">
+                        {formatCurrency(item.revenue)}
+                      </span>
+                      {item.profit !== undefined && (
+                        <span className="block text-xs text-slate-500">
+                          Profit: {formatCurrency(item.profit)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
-
-            {/* Projection info */}
-            {projection && (
-              <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6">
-                <h2 className="font-semibold text-lg text-blue-900 mb-1">
-                  30-Day Revenue Projection
-                </h2>
-                <p className="text-blue-700 text-sm mb-4">{projection.method}</p>
-                <p className="text-2xl font-bold text-blue-900">
-                  {formatCurrency(
-                    projection.projectedRevenue.reduce((sum, d) => sum + d.revenue, 0)
-                  )}
-                </p>
-                <p className="text-sm text-blue-600 mt-1">
-                  Estimated total over the next 30 days
-                </p>
-              </div>
-            )}
           </div>
         )}
       </main>
@@ -207,7 +269,6 @@ export default function AnalyserPage() {
   );
 }
 
-// Small reusable metric card
 function MetricCard({
   title,
   value,
@@ -224,6 +285,7 @@ function MetricCard({
     indigo: "bg-indigo-50 text-indigo-600",
     emerald: "bg-emerald-50 text-emerald-600",
     rose: "bg-rose-50 text-rose-600",
+    amber: "bg-amber-50 text-amber-600",
   };
 
   return (
