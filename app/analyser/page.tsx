@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { parseSalesFile } from "@/lib/parseSales";
 import {
   calculateRevenueStats,
@@ -13,6 +13,7 @@ import {
   RevenueProjection,
   ProjectionMethod,
 } from "@/types/sales";
+import { translations, Lang } from "@/lib/i18n";
 import {
   Upload,
   FileSpreadsheet,
@@ -40,6 +41,16 @@ import {
   AreaChart,
 } from "recharts";
 
+const CURRENCIES = [
+  { code: "USD", locale: "en-US", symbol: "$" },
+  { code: "EUR", locale: "fr-FR", symbol: "€" },
+  { code: "GBP", locale: "en-GB", symbol: "£" },
+  { code: "CAD", locale: "en-CA", symbol: "C$" },
+  { code: "XOF", locale: "fr-FR", symbol: "CFA" },
+] as const;
+
+type CurrencyCode = (typeof CURRENCIES)[number]["code"];
+
 export default function AnalyserPage() {
   const [rows, setRows] = useState<SalesRow[]>([]);
   const [stats, setStats] = useState<RevenueStats | null>(null);
@@ -52,9 +63,51 @@ export default function AnalyserPage() {
   const [topN, setTopN] = useState(5);
   const [projectionDays, setProjectionDays] = useState(30);
   const [projectionMethod, setProjectionMethod] =
-    useState<ProjectionMethod>("trend");
+    useState<ProjectionMethod>("seasonal");
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
+  const [currency, setCurrency] = useState<CurrencyCode>("USD");
+  const [sourceCurrency, setSourceCurrency] = useState<CurrencyCode>("USD");
+  const [rates, setRates] = useState<Record<string, number>>({ USD: 1 });
+  const [ratesLoading, setRatesLoading] = useState(false);
+  const [lang, setLang] = useState<Lang>("en");
+
+  const t = translations[lang];
+
+    // Approximate static rates (used as fallback / offline)
+  const STATIC_RATES: Record<CurrencyCode, Record<CurrencyCode, number>> = {
+    USD: { USD: 1, EUR: 0.92, GBP: 0.79, CAD: 1.36, XOF: 600 },
+    EUR: { USD: 1.09, EUR: 1, GBP: 0.86, CAD: 1.48, XOF: 655 },
+    GBP: { USD: 1.27, EUR: 1.16, GBP: 1, CAD: 1.72, XOF: 760 },
+    CAD: { USD: 0.74, EUR: 0.68, GBP: 0.58, CAD: 1, XOF: 440 },
+    XOF: { USD: 0.00167, EUR: 0.00153, GBP: 0.00132, CAD: 0.00227, XOF: 1 },
+  };
+
+  const fetchRates = useCallback(async (base: CurrencyCode) => {
+    setRatesLoading(true);
+    try {
+      const res = await fetch(
+        `https://api.frankfurter.app/latest?from=${base}`,
+        { signal: AbortSignal.timeout(4000) }
+      );
+      if (!res.ok) throw new Error("Rate API unavailable");
+      const data = await res.json();
+      setRates({
+        ...STATIC_RATES[base],
+        [base]: 1,
+        ...data.rates,
+      });
+    } catch {
+      // Silent fallback — no crash
+      setRates(STATIC_RATES[base] || { USD: 1, EUR: 1, GBP: 1, CAD: 1, XOF: 1 });
+    } finally {
+      setRatesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRates(sourceCurrency);
+  }, [sourceCurrency, fetchRates]);
 
   const processData = (
     sourceRows: SalesRow[],
@@ -137,17 +190,28 @@ export default function AnalyserPage() {
     reprocess(projectionDays, projectionMethod, "", "");
   };
 
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat("en-US", {
+  const currencyInfo = CURRENCIES.find((c) => c.code === currency) || CURRENCIES[0];
+
+  /** Convert an amount from sourceCurrency into the display currency */
+  const convert = (value: number): number => {
+    if (sourceCurrency === currency) return value;
+    const rate = rates[currency];
+    if (rate === undefined) return value; // rates not loaded yet
+    return value * rate;
+  };
+
+  const formatCurrency = (value: number) => {
+    const converted = convert(value);
+    return new Intl.NumberFormat(currencyInfo.locale, {
       style: "currency",
-      currency: "USD",
+      currency: currencyInfo.code,
       maximumFractionDigits: 0,
-    }).format(value);
+    }).format(converted);
+  };
 
   const formatPercent = (value: number | null) =>
     value === null ? "N/A" : `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 
-  // Chart data: historical + projected
   const chartData = useMemo(() => {
     if (!stats || !projection) return [];
 
@@ -180,12 +244,14 @@ export default function AnalyserPage() {
     lines.push(`Avg Daily Revenue,${stats.averageDailyRevenue}`);
     lines.push(`Growth Rate %,${stats.growthRate ?? ""}`);
     lines.push("");
-    lines.push("Top Products,Revenue,Profit");
+    lines.push("Product,Revenue,Cost,Profit,Margin %,Quantity");
     stats.topProducts.slice(0, topN).forEach((p) => {
-      lines.push(`"${p.product}",${p.revenue},${p.profit ?? ""}`);
+      lines.push(
+        `"${p.product}",${p.revenue},${p.cost},${p.profit},${p.margin ?? ""},${p.quantity}`
+      );
     });
     lines.push("");
-    lines.push("Top Customers,Revenue,Orders");
+    lines.push("Customer,Revenue,Orders");
     stats.topCustomers.forEach((c) => {
       lines.push(`"${c.customer}",${c.revenue},${c.orders}`);
     });
@@ -212,29 +278,78 @@ export default function AnalyserPage() {
     <div className="min-h-screen bg-slate-50 text-slate-900">
       {/* Header */}
       <header className="bg-white border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-3">
             <div className="bg-blue-600 text-white p-2 rounded-lg">
               <BarChart3 size={22} />
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight">
-                Business Analyser
-              </h1>
-              <p className="text-sm text-slate-500">
-                Sales, Cost, Profit & Projections
-              </p>
+              <h1 className="text-xl font-bold tracking-tight">{t.appTitle}</h1>
+              <p className="text-sm text-slate-500">{t.appSubtitle}</p>
             </div>
           </div>
-          {stats && (
-            <button
-              onClick={exportCsv}
-              className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-            >
-              <Download size={16} />
-              Export CSV
-            </button>
-          )}
+
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* Language */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">{t.language}</span>
+              <select
+                value={lang}
+                onChange={(e) => setLang(e.target.value as Lang)}
+                className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="en">English</option>
+                <option value="fr">Français</option>
+              </select>
+            </div>
+
+            {/* Source currency (of the uploaded file) */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">{t.sourceCurrency}</span>
+              <select
+                value={sourceCurrency}
+                onChange={(e) =>
+                  setSourceCurrency(e.target.value as CurrencyCode)
+                }
+                className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.code}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Display currency */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">{t.currency}</span>
+              <select
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value as CurrencyCode)}
+                className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.code}
+                  </option>
+                ))}
+              </select>
+              {ratesLoading && (
+                <span className="text-xs text-slate-400">…</span>
+              )}
+            </div>
+
+            {stats && (
+              <button
+                onClick={exportCsv}
+                className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                <Download size={16} />
+                {t.exportCsv}
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -250,17 +365,14 @@ export default function AnalyserPage() {
               <Upload className="text-blue-600" size={32} />
             </div>
             <div>
-              <p className="text-lg font-medium">Drop your sales file here</p>
-              <p className="text-slate-500 text-sm mt-1">
-                Supports CSV and Excel — include a Cost column for profit
-                analysis
-              </p>
+              <p className="text-lg font-medium">{t.dropTitle}</p>
+              <p className="text-slate-500 text-sm mt-1">{t.dropHint}</p>
             </div>
 
             <label className="mt-2 cursor-pointer">
               <span className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors">
                 <FileSpreadsheet size={18} />
-                Choose File
+                {t.chooseFile}
               </span>
               <input
                 type="file"
@@ -272,16 +384,14 @@ export default function AnalyserPage() {
 
             {fileName && (
               <p className="text-sm text-slate-600 mt-2">
-                Selected: <span className="font-medium">{fileName}</span>
+                {t.selected}: <span className="font-medium">{fileName}</span>
               </p>
             )}
           </div>
         </div>
 
         {loading && (
-          <div className="mt-10 text-center text-slate-600">
-            Processing your file...
-          </div>
+          <div className="mt-10 text-center text-slate-600">{t.processing}</div>
         )}
 
         {error && (
@@ -294,10 +404,9 @@ export default function AnalyserPage() {
           <div className="mt-12 space-y-10">
             {/* Controls */}
             <div className="flex flex-wrap gap-6 items-end bg-white border border-slate-200 rounded-2xl px-6 py-5">
-              {/* Date range */}
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-medium text-slate-600">
-                  Date range
+                  {t.dateRange}
                 </label>
                 <div className="flex items-center gap-2">
                   <input
@@ -317,27 +426,27 @@ export default function AnalyserPage() {
                     onClick={handleDateFilter}
                     className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
                   >
-                    Apply
+                    {t.apply}
                   </button>
                   {(startDate || endDate) && (
                     <button
                       onClick={clearDateFilter}
                       className="text-slate-500 hover:text-slate-700 text-sm underline"
                     >
-                      Clear
+                      {t.clear}
                     </button>
                   )}
                 </div>
                 {stats.dateRange.min && (
                   <p className="text-xs text-slate-400 mt-1">
-                    Data spans {stats.dateRange.min} → {stats.dateRange.max}
+                    {t.dataSpans} {stats.dateRange.min} → {stats.dateRange.max}
                   </p>
                 )}
               </div>
 
               <div className="flex items-center gap-3">
                 <label className="text-sm font-medium text-slate-600">
-                  Top Products:
+                  {t.topProducts}:
                 </label>
                 <select
                   value={topN}
@@ -352,7 +461,7 @@ export default function AnalyserPage() {
 
               <div className="flex items-center gap-3">
                 <label className="text-sm font-medium text-slate-600">
-                  Projection:
+                  {t.projection}:
                 </label>
                 <select
                   value={projectionDays}
@@ -361,15 +470,15 @@ export default function AnalyserPage() {
                   }
                   className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value={30}>30 Days</option>
-                  <option value={60}>60 Days</option>
-                  <option value={90}>90 Days</option>
+                  <option value={30}>30</option>
+                  <option value={60}>60</option>
+                  <option value={90}>90</option>
                 </select>
               </div>
 
               <div className="flex items-center gap-3">
                 <label className="text-sm font-medium text-slate-600">
-                  Method:
+                  {t.method}:
                 </label>
                 <select
                   value={projectionMethod}
@@ -378,8 +487,9 @@ export default function AnalyserPage() {
                   }
                   className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="trend">Trend (linear)</option>
-                  <option value="average">Flat average</option>
+                  <option value="seasonal">{t.methodSeasonal}</option>
+                  <option value="trend">{t.methodTrend}</option>
+                  <option value="average">{t.methodAverage}</option>
                 </select>
               </div>
             </div>
@@ -387,25 +497,25 @@ export default function AnalyserPage() {
             {/* Core Revenue Metrics */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
               <MetricCard
-                title="Total Revenue"
+                title={t.totalRevenue}
                 value={formatCurrency(stats.totalRevenue)}
                 icon={<DollarSign size={20} />}
                 color="blue"
               />
               <MetricCard
-                title="Total Orders"
+                title={t.totalOrders}
                 value={stats.totalOrders.toLocaleString()}
                 icon={<ShoppingCart size={20} />}
                 color="indigo"
               />
               <MetricCard
-                title="Avg. Order Value"
+                title={t.avgOrderValue}
                 value={formatCurrency(stats.averageOrderValue)}
                 icon={<TrendingUp size={20} />}
                 color="emerald"
               />
               <MetricCard
-                title="Growth Rate"
+                title={t.growthRate}
                 value={formatPercent(stats.growthRate)}
                 icon={<BarChart3 size={20} />}
                 color={
@@ -417,19 +527,19 @@ export default function AnalyserPage() {
             {/* Cost & Profit Metrics */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
               <MetricCard
-                title="Total Cost"
+                title={t.totalCost}
                 value={formatCurrency(stats.totalCost)}
                 icon={<Wallet size={20} />}
                 color="amber"
               />
               <MetricCard
-                title="Total Profit"
+                title={t.totalProfit}
                 value={formatCurrency(stats.totalProfit)}
                 icon={<PiggyBank size={20} />}
                 color={stats.totalProfit >= 0 ? "emerald" : "rose"}
               />
               <MetricCard
-                title="Profit Margin"
+                title={t.profitMargin}
                 value={
                   stats.profitMargin !== null
                     ? `${stats.profitMargin.toFixed(1)}%`
@@ -443,7 +553,7 @@ export default function AnalyserPage() {
                 }
               />
               <MetricCard
-                title="Avg Daily Revenue"
+                title={t.avgDailyRevenue}
                 value={formatCurrency(stats.averageDailyRevenue)}
                 icon={<CalendarDays size={20} />}
                 color="blue"
@@ -453,9 +563,7 @@ export default function AnalyserPage() {
             {/* Revenue + Projection Chart */}
             {chartData.length > 0 && (
               <div className="bg-white rounded-2xl border border-slate-200 p-6">
-                <h2 className="font-semibold text-lg mb-1">
-                  Revenue Over Time + Projection
-                </h2>
+                <h2 className="font-semibold text-lg mb-1">{t.revenueChart}</h2>
                 <p className="text-sm text-slate-500 mb-6">
                   {projection?.method}
                 </p>
@@ -471,18 +579,18 @@ export default function AnalyserPage() {
                       <YAxis
                         tick={{ fontSize: 11 }}
                         tickFormatter={(v) =>
-                          v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v}`
+                          v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`
                         }
                       />
                       <Tooltip
                         formatter={(value: number) => formatCurrency(value)}
-                        labelFormatter={(label) => `Date: ${label}`}
+                        labelFormatter={(label) => label}
                       />
                       <Legend />
                       <Area
                         type="monotone"
                         dataKey="actual"
-                        name="Actual"
+                        name={lang === "fr" ? "Réel" : "Actual"}
                         stroke="#2563eb"
                         fill="#93c5fd"
                         fillOpacity={0.4}
@@ -492,7 +600,7 @@ export default function AnalyserPage() {
                       <Area
                         type="monotone"
                         dataKey="projected"
-                        name="Projected"
+                        name={lang === "fr" ? "Projeté" : "Projected"}
                         stroke="#7c3aed"
                         fill="#c4b5fd"
                         fillOpacity={0.3}
@@ -506,18 +614,18 @@ export default function AnalyserPage() {
               </div>
             )}
 
-            {/* Projection summary cards */}
+            {/* Projection summary */}
             {projection && (
               <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6">
                 <h2 className="font-semibold text-lg text-blue-900 mb-1">
-                  {projectionDays}-Day Revenue Projection
+                  {t.projectionTitle(projectionDays)}
                 </h2>
                 <p className="text-blue-700 text-sm mb-5">{projection.method}</p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                   <div>
                     <p className="text-sm text-blue-600 mb-1">
-                      Current Avg Daily Revenue
+                      {t.currentAvgDaily}
                     </p>
                     <p className="text-2xl font-bold text-blue-900">
                       {formatCurrency(stats.averageDailyRevenue)}
@@ -525,7 +633,7 @@ export default function AnalyserPage() {
                   </div>
                   <div>
                     <p className="text-sm text-blue-600 mb-1">
-                      Projected Daily (start)
+                      {t.projectedDailyStart}
                     </p>
                     <p className="text-2xl font-bold text-blue-900">
                       {formatCurrency(
@@ -535,7 +643,7 @@ export default function AnalyserPage() {
                   </div>
                   <div>
                     <p className="text-sm text-blue-600 mb-1">
-                      Estimated {projectionDays}-Day Total
+                      {t.estimatedTotal(projectionDays)}
                     </p>
                     <p className="text-2xl font-bold text-blue-900">
                       {formatCurrency(
@@ -550,13 +658,73 @@ export default function AnalyserPage() {
               </div>
             )}
 
-            {/* Top Products + Top Customers */}
+            {/* Product Cost Breakdown */}
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-100">
+                <h2 className="font-semibold text-lg">{t.productBreakdown}</h2>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 text-left text-slate-500">
+                      <th className="px-6 py-3 font-medium">#</th>
+                      <th className="px-6 py-3 font-medium">
+                        {lang === "fr" ? "Produit" : "Product"}
+                      </th>
+                      <th className="px-6 py-3 font-medium text-right">
+                        {t.qty}
+                      </th>
+                      <th className="px-6 py-3 font-medium text-right">
+                        {t.revenue}
+                      </th>
+                      <th className="px-6 py-3 font-medium text-right">
+                        {t.cost}
+                      </th>
+                      <th className="px-6 py-3 font-medium text-right">
+                        {t.profit}
+                      </th>
+                      <th className="px-6 py-3 font-medium text-right">
+                        {t.margin}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {stats.topProducts.slice(0, topN).map((item, index) => (
+                      <tr key={item.product}>
+                        <td className="px-6 py-3 text-slate-400">{index + 1}</td>
+                        <td className="px-6 py-3 font-medium">{item.product}</td>
+                        <td className="px-6 py-3 text-right">{item.quantity}</td>
+                        <td className="px-6 py-3 text-right">
+                          {formatCurrency(item.revenue)}
+                        </td>
+                        <td className="px-6 py-3 text-right">
+                          {formatCurrency(item.cost)}
+                        </td>
+                        <td
+                          className={`px-6 py-3 text-right font-medium ${
+                            item.profit >= 0 ? "text-emerald-600" : "text-rose-600"
+                          }`}
+                        >
+                          {formatCurrency(item.profit)}
+                        </td>
+                        <td className="px-6 py-3 text-right">
+                          {item.margin !== null
+                            ? `${item.margin.toFixed(1)}%`
+                            : "N/A"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Top Products chart + Top Customers */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Top Products */}
               <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
                 <div className="px-6 py-4 border-b border-slate-100">
                   <h2 className="font-semibold text-lg">
-                    Top {topN} Products by Revenue
+                    {t.topProductsByRevenue(topN)}
                   </h2>
                 </div>
                 <div className="h-64 p-4">
@@ -571,7 +739,7 @@ export default function AnalyserPage() {
                         type="number"
                         tick={{ fontSize: 11 }}
                         tickFormatter={(v) =>
-                          v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v}`
+                          v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`
                         }
                       />
                       <YAxis
@@ -591,46 +759,18 @@ export default function AnalyserPage() {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-                <div className="divide-y divide-slate-100 border-t border-slate-100">
-                  {stats.topProducts.slice(0, topN).map((item, index) => (
-                    <div
-                      key={item.product}
-                      className="flex items-center justify-between px-6 py-2.5"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-slate-400 text-sm w-5">
-                          {index + 1}
-                        </span>
-                        <span className="font-medium text-sm">
-                          {item.product}
-                        </span>
-                      </div>
-                      <div className="text-right">
-                        <span className="font-semibold text-slate-700 text-sm">
-                          {formatCurrency(item.revenue)}
-                        </span>
-                        {item.profit !== undefined && (
-                          <span className="block text-xs text-slate-500">
-                            Profit: {formatCurrency(item.profit)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </div>
 
-              {/* Top Customers */}
               <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
                 <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
                   <Users size={18} className="text-slate-500" />
-                  <h2 className="font-semibold text-lg">Top Customers</h2>
+                  <h2 className="font-semibold text-lg">{t.topCustomers}</h2>
                 </div>
                 {stats.topCustomers.length === 0 ? (
                   <div className="px-6 py-12 text-center text-slate-500 text-sm">
-                    No customer data found in the file.
+                    {t.noCustomerData}
                     <br />
-                    Add a &quot;Customer&quot; column to enable this view.
+                    {t.addCustomerColumn}
                   </div>
                 ) : (
                   <div className="divide-y divide-slate-100">
@@ -652,8 +792,8 @@ export default function AnalyserPage() {
                             {formatCurrency(item.revenue)}
                           </span>
                           <span className="block text-xs text-slate-500">
-                            {item.orders} order
-                            {item.orders !== 1 ? "s" : ""}
+                            {item.orders}{" "}
+                            {item.orders !== 1 ? t.orders : t.order}
                           </span>
                         </div>
                       </div>
@@ -663,19 +803,19 @@ export default function AnalyserPage() {
               </div>
             </div>
 
-            {/* Monthly breakdown table */}
+            {/* Monthly breakdown */}
             {stats.revenueByPeriod.length > 0 && (
               <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
                 <div className="px-6 py-4 border-b border-slate-100">
-                  <h2 className="font-semibold text-lg">Monthly Revenue</h2>
+                  <h2 className="font-semibold text-lg">{t.monthlyRevenue}</h2>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-slate-50 text-left text-slate-500">
-                        <th className="px-6 py-3 font-medium">Month</th>
+                        <th className="px-6 py-3 font-medium">{t.month}</th>
                         <th className="px-6 py-3 font-medium text-right">
-                          Revenue
+                          {t.revenue}
                         </th>
                       </tr>
                     </thead>

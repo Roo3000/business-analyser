@@ -381,13 +381,13 @@ export function projectRevenue(
     });
   }
 
-  let methodLabel: string;
+    let methodLabel: string;
   if (method === "seasonal" && dailySeries.length >= 3) {
-    methodLabel = `Trend + day-of-week seasonality (slope ≈ $${slope.toFixed(2)}/day)`;
+    methodLabel = "Trend + day-of-week seasonality";
   } else if (method === "trend" && dailySeries.length >= 3) {
-    methodLabel = `Linear trend (daily change ≈ $${slope.toFixed(2)})`;
+    methodLabel = "Linear trend";
   } else {
-    methodLabel = `Average daily revenue of $${avgDailyRevenue.toFixed(2)}`;
+    methodLabel = "Flat average daily revenue";
   }
 
   return {

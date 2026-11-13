@@ -47,8 +47,10 @@ export const translations = {
     orders: "orders",
     order: "order",
     currency: "Currency",
+    sourceCurrency: "File currency",
     language: "Language",
     productBreakdown: "Product Cost Breakdown",
+    ratesUpdated: "Rates updated",
   },
   fr: {
     appTitle: "Analyseur d'Entreprise",
@@ -96,8 +98,10 @@ export const translations = {
     orders: "commandes",
     order: "commande",
     currency: "Devise",
+    sourceCurrency: "Devise du fichier",
     language: "Langue",
     productBreakdown: "Détail coûts par produit",
+    ratesUpdated: "Taux mis à jour",
   },
 } as const;
 
