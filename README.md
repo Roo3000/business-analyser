@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Business Analyser
+
+Sales & e-commerce revenue analyser with cost/profit insights, charts, date filters, and trend-based projections.
+
+## Features
+
+- **Upload** CSV or Excel files (flexible column name detection)
+- **Metrics**: Total revenue, orders, AOV, cost, profit, margin, growth rate, average daily revenue
+- **Date range filter** – analyse any period within your data
+- **Charts**:
+  - Revenue over time + projected future revenue (area chart)
+  - Top products (horizontal bar chart)
+- **Projection methods**:
+  - **Trend** – simple linear regression on daily revenue
+  - **Flat average** – constant average daily revenue
+- **Top customers** (when a Customer column is present)
+- **Monthly breakdown** table
+- **Export** full analysis to CSV
+
+## Expected columns (flexible names)
+
+| Field       | Accepted headers                                      |
+|-------------|-------------------------------------------------------|
+| Date        | Date, Order Date, order_date, OrderDate               |
+| Order ID    | Order ID, OrderID, order_id, orderId                  |
+| Product     | Product, product, Item, item                          |
+| Quantity    | Quantity, quantity, Qty, qty                          |
+| Unit Price  | Unit Price, unit_price, Price, price, UnitPrice       |
+| Revenue     | Revenue, revenue, Total, total, Amount                |
+| Cost        | Cost, cost, Unit Cost, COGS, Purchase Cost            |
+| Customer    | Customer, customer, Customer Name, customer_name      |
+
+If Revenue is missing it is calculated as Quantity × Unit Price.  
+If Cost is a unit cost it is automatically multiplied by Quantity.
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
