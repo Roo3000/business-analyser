@@ -27,6 +27,9 @@ import {
   CalendarDays,
   Download,
   Users,
+  Moon,
+  Sun,
+  Target,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -75,6 +78,10 @@ export default function AnalyserPage() {
   const [rates, setRates] = useState<Record<string, number>>({ USD: 1 });
   const [ratesLoading, setRatesLoading] = useState(false);
   const [lang, setLang] = useState<Lang>("en");
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [themeReady, setThemeReady] = useState(false);
+  const [targetMargin, setTargetMargin] = useState(25);
+  const [targetCostRatio, setTargetCostRatio] = useState(70);
 
   const t = translations[lang];
 
@@ -112,9 +119,55 @@ export default function AnalyserPage() {
     }
   }, []);
 
+    // Init theme + targets from localStorage
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("theme") as "light" | "dark" | null;
+    if (savedTheme === "light" || savedTheme === "dark") {
+      setTheme(savedTheme);
+    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      setTheme("dark");
+    }
+    setThemeReady(true);
+
+    const savedMargin = localStorage.getItem("targetMargin");
+    if (savedMargin !== null) {
+      const n = Number(savedMargin);
+      if (!Number.isNaN(n)) setTargetMargin(n);
+    }
+    const savedCost = localStorage.getItem("targetCostRatio");
+    if (savedCost !== null) {
+      const n = Number(savedCost);
+      if (!Number.isNaN(n)) setTargetCostRatio(n);
+    }
+  }, []);
+
+  // Apply theme class to <html> and persist
+  useEffect(() => {
+    if (!themeReady) return;
+    const root = document.documentElement;
+    if (theme === "dark") {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
+    localStorage.setItem("theme", theme);
+  }, [theme, themeReady]);
+
+  // Persist targets
+  useEffect(() => {
+    localStorage.setItem("targetMargin", String(targetMargin));
+  }, [targetMargin]);
+
+  useEffect(() => {
+    localStorage.setItem("targetCostRatio", String(targetCostRatio));
+  }, [targetCostRatio]);
   useEffect(() => {
     fetchRates(sourceCurrency);
   }, [sourceCurrency, fetchRates]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === "light" ? "dark" : "light"));
+  };
 
   const processData = (
     sourceRows: SalesRow[],
@@ -469,9 +522,9 @@ export default function AnalyserPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200">
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
         <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-3">
             <div className="bg-blue-600 text-white p-2 rounded-lg">
@@ -479,18 +532,32 @@ export default function AnalyserPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold tracking-tight">{t.appTitle}</h1>
-              <p className="text-sm text-slate-500">{t.appSubtitle}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{t.appSubtitle}</p>
             </div>
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
+            {/* Theme toggle */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              {theme === "dark" ? (
+                <Sun size={18} className="text-amber-400" />
+              ) : (
+                <Moon size={18} className="text-slate-600" />
+              )}
+            </button>
             {/* Language */}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">{t.language}</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">{t.language}</span>
               <select
                 value={lang}
                 onChange={(e) => setLang(e.target.value as Lang)}
-                className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="en">English</option>
                 <option value="fr">Français</option>
@@ -499,13 +566,13 @@ export default function AnalyserPage() {
 
             {/* Source currency (of the uploaded file) */}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">{t.sourceCurrency}</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">{t.sourceCurrency}</span>
               <select
                 value={sourceCurrency}
                 onChange={(e) =>
                   setSourceCurrency(e.target.value as CurrencyCode)
                 }
-                className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 {CURRENCIES.map((c) => (
                   <option key={c.code} value={c.code}>
@@ -517,11 +584,11 @@ export default function AnalyserPage() {
 
             {/* Display currency */}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">{t.currency}</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">{t.currency}</span>
               <select
                 value={currency}
                 onChange={(e) => setCurrency(e.target.value as CurrencyCode)}
-                className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 {CURRENCIES.map((c) => (
                   <option key={c.code} value={c.code}>
@@ -552,15 +619,15 @@ export default function AnalyserPage() {
         <div
           onDrop={onDrop}
           onDragOver={(e) => e.preventDefault()}
-          className="border-2 border-dashed border-slate-300 rounded-2xl bg-white p-12 text-center hover:border-blue-400 transition-colors"
+          className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-2xl bg-white dark:bg-slate-900 p-12 text-center hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
         >
           <div className="flex flex-col items-center gap-4">
-            <div className="bg-blue-50 p-4 rounded-full">
-              <Upload className="text-blue-600" size={32} />
+            <div className="bg-blue-50 dark:bg-blue-950/50 p-4 rounded-full">
+              <Upload className="text-blue-600 dark:text-blue-400" size={32} />
             </div>
             <div>
-              <p className="text-lg font-medium">{t.dropTitle}</p>
-              <p className="text-slate-500 text-sm mt-1">{t.dropHint}</p>
+              <p className="text-lg font-medium text-slate-900 dark:text-slate-100">{t.dropTitle}</p>
+              <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">{t.dropHint}</p>
             </div>
 
             <label className="mt-2 cursor-pointer">
@@ -577,19 +644,19 @@ export default function AnalyserPage() {
             </label>
 
             {fileName && (
-              <p className="text-sm text-slate-600 mt-2">
-                {t.selected}: <span className="font-medium">{fileName}</span>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mt-2">
+                {t.selected}: <span className="font-medium text-slate-800 dark:text-slate-200">{fileName}</span>
               </p>
             )}
           </div>
         </div>
 
         {loading && (
-          <div className="mt-10 text-center text-slate-600">{t.processing}</div>
+          <div className="mt-10 text-center text-slate-600 dark:text-slate-400">{t.processing}</div>
         )}
 
         {error && (
-          <div className="mt-8 bg-red-50 border border-red-200 text-red-700 px-5 py-4 rounded-xl">
+          <div className="mt-8 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 px-5 py-4 rounded-xl">
             {error}
           </div>
         )}
@@ -597,9 +664,9 @@ export default function AnalyserPage() {
         {stats && !loading && (
           <div className="mt-12 space-y-10">
             {/* Controls */}
-            <div className="flex flex-wrap gap-6 items-end bg-white border border-slate-200 rounded-2xl px-6 py-5">
+           <div className="flex flex-wrap gap-6 items-end bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl px-6 py-5">
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-slate-600">
+                <label className="text-sm font-medium text-slate-600 dark:text-slate-300 dark:text-slate-300">
                   {t.dateRange}
                 </label>
                 <div className="flex items-center gap-2">
@@ -607,14 +674,14 @@ export default function AnalyserPage() {
                     type="date"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
-                    className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                   className="border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <span className="text-slate-400">→</span>
                   <input
                     type="date"
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
-                    className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <button
                     onClick={handleDateFilter}
@@ -651,7 +718,7 @@ export default function AnalyserPage() {
                           p.id as "7d" | "30d" | "thisMonth" | "lastMonth" | "all"
                         )
                       }
-                      className="text-xs px-2.5 py-1 rounded-full border border-slate-300 hover:bg-slate-100 text-slate-600"
+                      className="text-xs px-2.5 py-1 rounded-full border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
                     >
                       {p.label}
                     </button>
@@ -660,13 +727,13 @@ export default function AnalyserPage() {
               </div>
 
               <div className="flex items-center gap-3">
-                <label className="text-sm font-medium text-slate-600">
+                <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
                   {t.topProducts}:
                 </label>
                 <select
                   value={topN}
                   onChange={(e) => setTopN(Number(e.target.value))}
-                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value={3}>Top 3</option>
                   <option value={5}>Top 5</option>
@@ -675,7 +742,7 @@ export default function AnalyserPage() {
               </div>
 
               <div className="flex items-center gap-3">
-                <label className="text-sm font-medium text-slate-600">
+                <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
                   {t.projection}:
                 </label>
                 <select
@@ -683,7 +750,7 @@ export default function AnalyserPage() {
                   onChange={(e) =>
                     handleProjectionDaysChange(Number(e.target.value))
                   }
-                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value={30}>30</option>
                   <option value={60}>60</option>
@@ -692,7 +759,7 @@ export default function AnalyserPage() {
               </div>
 
               <div className="flex items-center gap-3">
-                <label className="text-sm font-medium text-slate-600">
+                <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
                   {t.method}:
                 </label>
                 <select
@@ -700,7 +767,7 @@ export default function AnalyserPage() {
                   onChange={(e) =>
                     handleMethodChange(e.target.value as ProjectionMethod)
                   }
-                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="seasonal">{t.methodSeasonal}</option>
                   <option value="trend">{t.methodTrend}</option>
@@ -709,7 +776,7 @@ export default function AnalyserPage() {
               </div>
 
               <div className="flex items-center gap-3">
-                <label className="text-sm font-medium text-slate-600">
+                <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
                   {lang === "fr" ? "Produit" : "Product"}:
                 </label>
                 <select
@@ -725,7 +792,7 @@ export default function AnalyserPage() {
                       val
                     );
                   }}
-                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[180px]"
+                  className="border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[180px]"
                 >
                   <option value="">
                     {lang === "fr" ? "Tous" : "All products"}
@@ -807,7 +874,7 @@ export default function AnalyserPage() {
 
             {/* Auto insights */}
             {insights.length > 0 && (
-              <div className="bg-white rounded-2xl border border-slate-200 p-6">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-6">
                 <h2 className="font-semibold text-lg mb-4">
                   {lang === "fr" ? "Points clés" : "Key insights"}
                 </h2>
@@ -832,7 +899,7 @@ export default function AnalyserPage() {
 
             {/* Period comparison */}
             {previousStats && previousStats.totalOrders > 0 && (
-              <div className="bg-white rounded-2xl border border-slate-200 p-6">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-6">
                 <h2 className="font-semibold text-lg mb-4">
                   {lang === "fr" ? "Comparaison avec la période précédente" : "vs Previous Period"}
                 </h2>
@@ -898,9 +965,9 @@ export default function AnalyserPage() {
 
             {/* Revenue + Projection Chart */}
             {chartData.length > 0 && (
-              <div className="bg-white rounded-2xl border border-slate-200 p-6">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-6">
                 <h2 className="font-semibold text-lg mb-1">{t.revenueChart}</h2>
-                <p className="text-sm text-slate-500 mb-6">
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
                   {projection?.method}
                 </p>
                 <div className="h-80">
@@ -952,7 +1019,7 @@ export default function AnalyserPage() {
 
             {/* Projection summary */}
             {projection && (
-              <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6">
+              <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900 rounded-2xl p-6">
                 <h2 className="font-semibold text-lg text-blue-900 mb-1">
                   {t.projectionTitle(projectionDays)}
                 </h2>
@@ -998,7 +1065,7 @@ export default function AnalyserPage() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Monthly bars */}
               {stats.revenueByPeriod.length > 0 && (
-                <div className="bg-white rounded-2xl border border-slate-200 p-6">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-6">
                   <h2 className="font-semibold text-lg mb-4">
                     {t.monthlyRevenue}
                   </h2>
@@ -1034,7 +1101,7 @@ export default function AnalyserPage() {
 
               {/* Profit by product */}
               {stats.topProducts.some((p) => p.cost > 0 || p.profit !== 0) && (
-                <div className="bg-white rounded-2xl border border-slate-200 p-6">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-6">
                   <h2 className="font-semibold text-lg mb-4">
                     {lang === "fr" ? "Profit par produit" : "Profit by product"}
                   </h2>
@@ -1084,7 +1151,7 @@ export default function AnalyserPage() {
             </div>
 
             {/* Product Cost Breakdown */}
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
               <div className="px-6 py-4 border-b border-slate-100">
                 <h2 className="font-semibold text-lg">{t.productBreakdown}</h2>
               </div>
@@ -1171,7 +1238,7 @@ export default function AnalyserPage() {
 
             {/* Top Products chart + Top Customers */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                 <div className="px-6 py-4 border-b border-slate-100">
                   <h2 className="font-semibold text-lg">
                     {t.topProductsByRevenue(topN)}
@@ -1211,7 +1278,7 @@ export default function AnalyserPage() {
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                 <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
                   <Users size={18} className="text-slate-500" />
                   <h2 className="font-semibold text-lg">{t.topCustomers}</h2>
@@ -1269,7 +1336,7 @@ export default function AnalyserPage() {
 
             {/* Customer detail */}
             {selectedCustomer && (
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                 <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                   <h2 className="font-semibold text-lg">
                     {lang === "fr" ? "Détail client" : "Customer detail"}:{" "}
@@ -1278,7 +1345,7 @@ export default function AnalyserPage() {
                   <button
                     type="button"
                     onClick={() => setSelectedCustomer(null)}
-                    className="text-sm text-slate-500 hover:text-slate-800 underline"
+                    className="text-sm text-slate-500 dark:text-slate-400 hover:text-slate-800 underline"
                   >
                     {lang === "fr" ? "Fermer" : "Close"}
                   </button>
@@ -1362,7 +1429,7 @@ export default function AnalyserPage() {
 
             {/* Monthly breakdown */}
             {stats.revenueByPeriod.length > 0 && (
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                 <div className="px-6 py-4 border-b border-slate-100">
                   <h2 className="font-semibold text-lg">{t.monthlyRevenue}</h2>
                 </div>
@@ -1411,20 +1478,20 @@ function MetricCard({
   color: string;
 }) {
   const colorMap: Record<string, string> = {
-    blue: "bg-blue-50 text-blue-600",
-    indigo: "bg-indigo-50 text-indigo-600",
-    emerald: "bg-emerald-50 text-emerald-600",
-    rose: "bg-rose-50 text-rose-600",
-    amber: "bg-amber-50 text-amber-600",
+    blue: "bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400",
+    indigo: "bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400",
+    emerald: "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400",
+    rose: "bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400",
+    amber: "bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400",
   };
 
-  return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-5">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-sm text-slate-500 font-medium">{title}</span>
-        <div className={`p-2 rounded-lg ${colorMap[color]}`}>{icon}</div>
-      </div>
-      <p className="text-2xl font-bold tracking-tight">{value}</p>
+return (
+  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-5">
+    <div className="flex items-center justify-between mb-3">
+      <span className="text-sm text-slate-500 dark:text-slate-400 font-medium">{title}</span>
+      <div className={`p-2 rounded-lg ${colorMap[color]}`}>{icon}</div>
     </div>
-  );
+    <p className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">{value}</p>
+  </div>
+);
 }
