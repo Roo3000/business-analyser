@@ -9,6 +9,15 @@ export interface SalesRow {
   customer?: string;
 }
 
+export interface ProductStats {
+  product: string;
+  revenue: number;
+  cost: number;
+  profit: number;
+  margin: number | null; // percentage
+  quantity: number;
+}
+
 export interface RevenueStats {
   totalRevenue: number;
   totalOrders: number;
@@ -19,10 +28,12 @@ export interface RevenueStats {
   averageDailyRevenue: number;
   revenueByPeriod: { period: string; revenue: number }[];
   revenueByDay: { date: string; revenue: number }[];
-  topProducts: { product: string; revenue: number; profit?: number }[];
+  topProducts: ProductStats[];
   topCustomers: { customer: string; revenue: number; orders: number }[];
   growthRate: number | null;
   dateRange: { min: string | null; max: string | null };
+  /** Average revenue by day of week (0=Sun … 6=Sat). Used for seasonality. */
+  dayOfWeekAvg: number[];
 }
 
 export interface RevenueProjection {
@@ -32,4 +43,4 @@ export interface RevenueProjection {
   trendSlope: number | null;
 }
 
-export type ProjectionMethod = "average" | "trend";
+export type ProjectionMethod = "average" | "trend" | "seasonal";
