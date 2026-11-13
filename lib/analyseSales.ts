@@ -1,22 +1,42 @@
 import { SalesRow, RevenueStats, RevenueProjection } from "@/types/sales";
-import { format, parseISO, addDays, isValid } from "date-fns";
+import { format, parseISO, addDays, isValid, fromExcelDate } from "date-fns";
 
-// Helper: try to parse different date formats
-function parseDate(dateStr: string): Date | null {
-  if (!dateStr) return null;
+// Robust date parser – handles strings, Excel serial numbers, and Date objects
+function parseDate(value: any): Date | null {
+  if (value === null || value === undefined || value === "") return null;
 
-  // Try ISO first
-  let d = parseISO(dateStr);
-  if (isValid(d)) return d;
+  // Already a Date
+  if (value instanceof Date) {
+    return isValid(value) ? value : null;
+  }
 
-  // Try common formats
-  const formats = [
-    dateStr, // already tried
-  ];
+  // Number → treat as Excel serial
+  if (typeof value === "number") {
+    const date = new Date(Math.round((value - 25569) * 86400 * 1000));
+    return isValid(date) ? date : null;
+  }
 
-  // Fallback: native Date
-  d = new Date(dateStr);
-  return isValid(d) ? d : null;
+  // String
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+
+    // Pure number string (Excel serial stored as text)
+    if (/^\d+(\.\d+)?$/.test(trimmed)) {
+      const num = parseFloat(trimmed);
+      const date = new Date(Math.round((num - 25569) * 86400 * 1000));
+      if (isValid(date)) return date;
+    }
+
+    // ISO format
+    let d = parseISO(trimmed);
+    if (isValid(d)) return d;
+
+    // Native fallback
+    d = new Date(trimmed);
+    if (isValid(d)) return d;
+  }
+
+  return null;
 }
 
 export function calculateRevenueStats(rows: SalesRow[]): RevenueStats {
@@ -42,7 +62,7 @@ export function calculateRevenueStats(rows: SalesRow[]): RevenueStats {
     const date = parseDate(row.date);
     if (!date) return;
 
-    const key = format(date, "yyyy-MM"); // e.g. "2025-03"
+    const key = format(date, "yyyy-MM");
     monthlyMap.set(key, (monthlyMap.get(key) || 0) + row.revenue);
   });
 
@@ -61,7 +81,7 @@ export function calculateRevenueStats(rows: SalesRow[]): RevenueStats {
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 5);
 
-  // Simple growth rate (last month vs previous month)
+  // Growth rate
   let growthRate: number | null = null;
   if (revenueByPeriod.length >= 2) {
     const last = revenueByPeriod[revenueByPeriod.length - 1].revenue;
@@ -92,7 +112,6 @@ export function projectRevenue(
     };
   }
 
-  // Calculate average daily revenue from the last 30 days of data (or all data)
   const sorted = [...rows]
     .map((r) => ({ ...r, parsedDate: parseDate(r.date) }))
     .filter((r) => r.parsedDate !== null)
@@ -113,7 +132,6 @@ export function projectRevenue(
 
   const avgDailyRevenue = totalRevenue / daySpan;
 
-  // Simple linear projection
   const projectedRevenue = [];
   for (let i = 1; i <= days; i++) {
     const futureDate = addDays(lastDate, i);
