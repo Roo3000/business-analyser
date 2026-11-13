@@ -3,6 +3,7 @@ import {
   RevenueStats,
   RevenueProjection,
   ProjectionMethod,
+  ProductStats,
 } from "@/types/sales";
 import {
   format,
@@ -11,6 +12,7 @@ import {
   isValid,
   isWithinInterval,
   startOfDay,
+  getDay,
 } from "date-fns";
 
 export function parseDate(value: any): Date | null {
@@ -89,6 +91,7 @@ export function calculateRevenueStats(rows: SalesRow[]): RevenueStats {
       topCustomers: [],
       growthRate: null,
       dateRange: { min: null, max: null },
+      dayOfWeekAvg: [0, 0, 0, 0, 0, 0, 0],
     };
   }
 
@@ -139,6 +142,20 @@ export function calculateRevenueStats(rows: SalesRow[]): RevenueStats {
     .map(([date, revenue]) => ({ date, revenue }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
+  // Day-of-week averages (for seasonality)
+  const dowSum = [0, 0, 0, 0, 0, 0, 0];
+  const dowCount = [0, 0, 0, 0, 0, 0, 0];
+  revenueByDay.forEach(({ date, revenue }) => {
+    const d = parseDate(date);
+    if (!d) return;
+    const dow = getDay(d); // 0=Sun … 6=Sat
+    dowSum[dow] += revenue;
+    dowCount[dow] += 1;
+  });
+  const dayOfWeekAvg = dowSum.map((sum, i) =>
+    dowCount[i] > 0 ? sum / dowCount[i] : averageDailyRevenue
+  );
+
   // Monthly
   const monthlyMap = new Map<string, number>();
   datedRows.forEach(({ row, date }) => {
@@ -149,20 +166,36 @@ export function calculateRevenueStats(rows: SalesRow[]): RevenueStats {
     .map(([period, revenue]) => ({ period, revenue }))
     .sort((a, b) => a.period.localeCompare(b.period));
 
-  // Top products
-  const productMap = new Map<string, { revenue: number; cost: number }>();
+  // Top products with full cost breakdown
+  const productMap = new Map<
+    string,
+    { revenue: number; cost: number; quantity: number }
+  >();
   rows.forEach((row) => {
-    const current = productMap.get(row.product) || { revenue: 0, cost: 0 };
+    const current = productMap.get(row.product) || {
+      revenue: 0,
+      cost: 0,
+      quantity: 0,
+    };
     current.revenue += row.revenue;
     current.cost += row.cost || 0;
+    current.quantity += row.quantity;
     productMap.set(row.product, current);
   });
-  const topProducts = Array.from(productMap.entries())
-    .map(([product, data]) => ({
-      product,
-      revenue: data.revenue,
-      profit: data.revenue - data.cost,
-    }))
+  const topProducts: ProductStats[] = Array.from(productMap.entries())
+    .map(([product, data]) => {
+      const profit = data.revenue - data.cost;
+      const margin =
+        data.revenue > 0 ? (profit / data.revenue) * 100 : null;
+      return {
+        product,
+        revenue: data.revenue,
+        cost: data.cost,
+        profit,
+        margin,
+        quantity: data.quantity,
+      };
+    })
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 10);
 
@@ -211,6 +244,7 @@ export function calculateRevenueStats(rows: SalesRow[]): RevenueStats {
     topCustomers,
     growthRate,
     dateRange: { min: minDate, max: maxDate },
+    dayOfWeekAvg,
   };
 }
 
@@ -218,11 +252,12 @@ export function calculateRevenueStats(rows: SalesRow[]): RevenueStats {
  * Project future revenue.
  * - "average": flat average daily revenue
  * - "trend": simple linear regression on daily revenue series
+ * - "seasonal": trend + day-of-week seasonality factors
  */
 export function projectRevenue(
   rows: SalesRow[],
   days: number = 30,
-  method: ProjectionMethod = "trend"
+  method: ProjectionMethod = "seasonal"
 ): RevenueProjection {
   if (rows.length === 0) {
     return {
@@ -258,7 +293,7 @@ export function projectRevenue(
   );
   const avgDailyRevenue = totalRevenue / daySpan;
 
-  // Daily series for regression
+  // Daily series
   const dailyMap = new Map<string, number>();
   sorted.forEach((r) => {
     const key = format(r.parsedDate!, "yyyy-MM-dd");
@@ -268,10 +303,14 @@ export function projectRevenue(
     .map(([date, revenue]) => ({ date, revenue }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
+  // Linear regression
   let slope = 0;
   let intercept = avgDailyRevenue;
 
-  if (method === "trend" && dailySeries.length >= 3) {
+  if (
+    (method === "trend" || method === "seasonal") &&
+    dailySeries.length >= 3
+  ) {
     const n = dailySeries.length;
     let sumX = 0;
     let sumY = 0;
@@ -294,6 +333,26 @@ export function projectRevenue(
     }
   }
 
+  // Day-of-week factors for seasonality
+  const dowSum = [0, 0, 0, 0, 0, 0, 0];
+  const dowCount = [0, 0, 0, 0, 0, 0, 0];
+  dailySeries.forEach(({ date, revenue }) => {
+    const d = parseDate(date);
+    if (!d) return;
+    const dow = getDay(d);
+    dowSum[dow] += revenue;
+    dowCount[dow] += 1;
+  });
+  const dowAvg = dowSum.map((sum, i) =>
+    dowCount[i] > 0 ? sum / dowCount[i] : avgDailyRevenue
+  );
+  // Normalize so the average of factors ≈ 1
+  const overallDowAvg =
+    dowAvg.reduce((a, b) => a + b, 0) / 7 || avgDailyRevenue;
+  const dowFactor = dowAvg.map((v) =>
+    overallDowAvg > 0 ? v / overallDowAvg : 1
+  );
+
   const projectedRevenue = [];
   const lastIndex = dailySeries.length - 1;
 
@@ -301,9 +360,17 @@ export function projectRevenue(
     const futureDate = addDays(lastDate, i);
     let revenue: number;
 
-    if (method === "trend" && dailySeries.length >= 3) {
+    if (method === "average") {
+      revenue = avgDailyRevenue;
+    } else if (method === "trend" && dailySeries.length >= 3) {
       revenue = intercept + slope * (lastIndex + i);
-      revenue = Math.max(0, revenue); // no negative revenue
+      revenue = Math.max(0, revenue);
+    } else if (method === "seasonal" && dailySeries.length >= 3) {
+      // Base trend value
+      const base = intercept + slope * (lastIndex + i);
+      // Apply day-of-week seasonality
+      const factor = dowFactor[getDay(futureDate)];
+      revenue = Math.max(0, base * factor);
     } else {
       revenue = avgDailyRevenue;
     }
@@ -314,15 +381,19 @@ export function projectRevenue(
     });
   }
 
-  const methodLabel =
-    method === "trend" && dailySeries.length >= 3
-      ? `Linear trend (daily change ≈ $${slope.toFixed(2)})`
-      : `Average daily revenue of $${avgDailyRevenue.toFixed(2)}`;
+  let methodLabel: string;
+  if (method === "seasonal" && dailySeries.length >= 3) {
+    methodLabel = `Trend + day-of-week seasonality (slope ≈ $${slope.toFixed(2)}/day)`;
+  } else if (method === "trend" && dailySeries.length >= 3) {
+    methodLabel = `Linear trend (daily change ≈ $${slope.toFixed(2)})`;
+  } else {
+    methodLabel = `Average daily revenue of $${avgDailyRevenue.toFixed(2)}`;
+  }
 
   return {
     projectedRevenue,
     method: methodLabel,
     averageDailyRevenue: avgDailyRevenue,
-    trendSlope: method === "trend" ? slope : null,
+    trendSlope: method !== "average" ? slope : null,
   };
 }
