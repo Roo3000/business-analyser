@@ -121,37 +121,54 @@ export default function AnalyserPage() {
 
     // Init theme + targets from localStorage
   useEffect(() => {
-    const savedTheme = localStorage.getItem("theme") as "light" | "dark" | null;
-    if (savedTheme === "light" || savedTheme === "dark") {
-      setTheme(savedTheme);
-    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      setTheme("dark");
-    }
-    setThemeReady(true);
+    try {
+      const savedTheme = localStorage.getItem("theme");
+      if (savedTheme === "light" || savedTheme === "dark") {
+        setTheme(savedTheme);
+      } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+        setTheme("dark");
+      }
 
-    const savedMargin = localStorage.getItem("targetMargin");
-    if (savedMargin !== null) {
-      const n = Number(savedMargin);
-      if (!Number.isNaN(n)) setTargetMargin(n);
-    }
-    const savedCost = localStorage.getItem("targetCostRatio");
-    if (savedCost !== null) {
-      const n = Number(savedCost);
-      if (!Number.isNaN(n)) setTargetCostRatio(n);
-    }
+      const savedMargin = localStorage.getItem("targetMargin");
+      if (savedMargin !== null) {
+        const n = Number(savedMargin);
+        if (!Number.isNaN(n)) setTargetMargin(n);
+      }
 
-      // NEW: language + currencies
-    const savedLang = localStorage.getItem("lang");
-    if (savedLang === "en" || savedLang === "fr") {
-      setLang(savedLang);
-    }
-    const savedCurrency = localStorage.getItem("currency");
-    if (savedCurrency && ["USD", "EUR", "GBP", "CAD", "XOF"].includes(savedCurrency)) {
-      setCurrency(savedCurrency as CurrencyCode);
-    }
-    const savedSource = localStorage.getItem("sourceCurrency");
-    if (savedSource && ["USD", "EUR", "GBP", "CAD", "XOF"].includes(savedSource)) {
-      setSourceCurrency(savedSource as CurrencyCode);
+      const savedCost = localStorage.getItem("targetCostRatio");
+      if (savedCost !== null) {
+        const n = Number(savedCost);
+        if (!Number.isNaN(n)) setTargetCostRatio(n);
+      }
+
+      const savedLang = localStorage.getItem("lang");
+      if (savedLang === "en" || savedLang === "fr") {
+        setLang(savedLang);
+      }
+
+      const savedCurrency = localStorage.getItem("currency");
+      if (
+        savedCurrency === "USD" ||
+        savedCurrency === "EUR" ||
+        savedCurrency === "GBP" ||
+        savedCurrency === "CAD" ||
+        savedCurrency === "XOF"
+      ) {
+        setCurrency(savedCurrency);
+      }
+
+      const savedSource = localStorage.getItem("sourceCurrency");
+      if (
+        savedSource === "USD" ||
+        savedSource === "EUR" ||
+        savedSource === "GBP" ||
+        savedSource === "CAD" ||
+        savedSource === "XOF"
+      ) {
+        setSourceCurrency(savedSource);
+      }
+    } finally {
+      setThemeReady(true);
     }
   }, []);
 
@@ -175,6 +192,21 @@ export default function AnalyserPage() {
   useEffect(() => {
     localStorage.setItem("targetCostRatio", String(targetCostRatio));
   }, [targetCostRatio]);
+  
+  useEffect(() => {
+    if (!themeReady) return;
+    localStorage.setItem("lang", lang);
+  }, [lang, themeReady]);
+
+  useEffect(() => {
+    if (!themeReady) return;
+    localStorage.setItem("currency", currency);
+  }, [currency, themeReady]);
+
+  useEffect(() => {
+    if (!themeReady) return;
+    localStorage.setItem("sourceCurrency", sourceCurrency);
+  }, [sourceCurrency, themeReady]);
   useEffect(() => {
     fetchRates(sourceCurrency);
   }, [sourceCurrency, fetchRates]);
