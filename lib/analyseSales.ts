@@ -96,7 +96,7 @@ export function calculateRevenueStats(rows: SalesRow[]): RevenueStats {
   }
 
   const totalRevenue = rows.reduce((sum, r) => sum + r.revenue, 0);
-  const totalOrders = rows.length;
+  const totalOrders = new Set(rows.map((r) => r.orderId)).size;
   const averageOrderValue = totalRevenue / totalOrders;
 
   const totalCost = rows.reduce((sum, r) => sum + (r.cost || 0), 0);
