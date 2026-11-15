@@ -1009,9 +1009,17 @@ export default function AnalyserPage() {
                           v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`
                         }
                       />
-                      <Tooltip
+                     <Tooltip
                         formatter={(value) => formatCurrency(Number(value ?? 0))}
                         labelFormatter={(label) => label}
+                        contentStyle={{
+                          backgroundColor: "var(--tooltip-bg, #1e293b)",
+                          border: "1px solid #334155",
+                          borderRadius: "8px",
+                          color: "#f1f5f9",
+                        }}
+                        labelStyle={{ color: "#94a3b8" }}
+                        itemStyle={{ color: "#f1f5f9" }}
                       />
                       <Legend />
                       <Area
@@ -1109,7 +1117,7 @@ export default function AnalyserPage() {
                           }
                         />
                         <Tooltip
-                          formatter={(value: number) => formatCurrency(value)}
+                          formatter={(value) => formatCurrency(Number(value ?? 0))}
                         />
                         <Bar
                           dataKey="revenue"
@@ -1152,8 +1160,17 @@ export default function AnalyserPage() {
                           width={100}
                           tick={{ fontSize: 11 }}
                         />
-                        <Tooltip
-                          formatter={(value: number) => formatCurrency(value)}
+                       <Tooltip
+                          formatter={(value) => formatCurrency(Number(value ?? 0))}
+                          labelFormatter={(label) => label}
+                          contentStyle={{
+                            backgroundColor: "var(--tooltip-bg, #1e293b)",
+                            border: "1px solid #334155",
+                            borderRadius: "8px",
+                            color: "#f1f5f9",
+                          }}
+                          labelStyle={{ color: "#94a3b8" }}
+                          itemStyle={{ color: "#f1f5f9" }}
                         />
                         <Bar
                           dataKey="profit"
@@ -1290,7 +1307,7 @@ export default function AnalyserPage() {
                         tick={{ fontSize: 11 }}
                       />
                      <Tooltip
-                        formatter={(value: number) => formatCurrency(value)}
+                        formatter={(value) => formatCurrency(Number(value ?? 0))}
                         labelFormatter={(label) => label}
                         contentStyle={{
                           backgroundColor: "var(--tooltip-bg, #1e293b)",
