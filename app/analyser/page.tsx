@@ -139,6 +139,20 @@ export default function AnalyserPage() {
       const n = Number(savedCost);
       if (!Number.isNaN(n)) setTargetCostRatio(n);
     }
+
+      // NEW: language + currencies
+    const savedLang = localStorage.getItem("lang");
+    if (savedLang === "en" || savedLang === "fr") {
+      setLang(savedLang);
+    }
+    const savedCurrency = localStorage.getItem("currency");
+    if (savedCurrency && ["USD", "EUR", "GBP", "CAD", "XOF"].includes(savedCurrency)) {
+      setCurrency(savedCurrency as CurrencyCode);
+    }
+    const savedSource = localStorage.getItem("sourceCurrency");
+    if (savedSource && ["USD", "EUR", "GBP", "CAD", "XOF"].includes(savedSource)) {
+      setSourceCurrency(savedSource as CurrencyCode);
+    }
   }, []);
 
   // Apply theme class to <html> and persist
