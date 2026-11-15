@@ -630,18 +630,42 @@ export default function AnalyserPage() {
               <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">{t.dropHint}</p>
             </div>
 
-            <label className="mt-2 cursor-pointer">
-              <span className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors">
-                <FileSpreadsheet size={18} />
-                {t.chooseFile}
-              </span>
-              <input
-                type="file"
-                accept=".csv,.xlsx,.xls"
-                onChange={onFileChange}
-                className="hidden"
-              />
-            </label>
+            <div className="mt-2 flex flex-wrap items-center justify-center gap-3">
+              <label className="cursor-pointer">
+                <span className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors">
+                  <FileSpreadsheet size={18} />
+                  {t.chooseFile}
+                </span>
+                <input
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  onChange={onFileChange}
+                  className="hidden"
+                />
+              </label>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setLoading(true);
+                  setError(null);
+                  try {
+                    const res = await fetch("/sample-sales-data.csv");
+                    const blob = await res.blob();
+                    const file = new File([blob], "sample-sales-data.csv", {
+                      type: "text/csv",
+                    });
+                    await handleFile(file);
+                  } catch {
+                    setError("Could not load sample data");
+                    setLoading(false);
+                  }
+                }}
+                className="inline-flex items-center gap-2 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 px-5 py-2.5 rounded-lg text-sm font-medium transition-colors"
+              >
+                Try sample data
+              </button>
+            </div>
 
             {fileName && (
               <p className="text-sm text-slate-600 dark:text-slate-400 mt-2">
@@ -986,7 +1010,7 @@ export default function AnalyserPage() {
                         }
                       />
                       <Tooltip
-                        formatter={(value: number) => formatCurrency(value)}
+                        formatter={(value) => formatCurrency(Number(value ?? 0))}
                         labelFormatter={(label) => label}
                       />
                       <Legend />
@@ -1158,7 +1182,7 @@ export default function AnalyserPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-slate-50 text-left text-slate-500">
+                    <tr className="bg-slate-50 dark:bg-slate-800 text-left text-slate-500 dark:text-slate-400">
                       <th className="px-6 py-3 font-medium">#</th>
                       <th className="px-6 py-3 font-medium">
                         {lang === "fr" ? "Produit" : "Product"}
@@ -1265,8 +1289,17 @@ export default function AnalyserPage() {
                         width={100}
                         tick={{ fontSize: 11 }}
                       />
-                      <Tooltip
+                     <Tooltip
                         formatter={(value: number) => formatCurrency(value)}
+                        labelFormatter={(label) => label}
+                        contentStyle={{
+                          backgroundColor: "var(--tooltip-bg, #1e293b)",
+                          border: "1px solid #334155",
+                          borderRadius: "8px",
+                          color: "#f1f5f9",
+                        }}
+                        labelStyle={{ color: "#94a3b8" }}
+                        itemStyle={{ color: "#f1f5f9" }}
                       />
                       <Bar
                         dataKey="revenue"
@@ -1436,7 +1469,7 @@ export default function AnalyserPage() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="bg-slate-50 text-left text-slate-500">
+                      <tr className="bg-slate-50 dark:bg-slate-800 text-left text-slate-500 dark:text-slate-400">
                         <th className="px-6 py-3 font-medium">{t.month}</th>
                         <th className="px-6 py-3 font-medium text-right">
                           {t.revenue}
