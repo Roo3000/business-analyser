@@ -1,5 +1,8 @@
 "use client";
 
+import { MetricCard } from "@/components/ui/MetricCard";
+import { UploadZone } from "@/components/ui/UploadZone";
+import { ControlsBar } from "@/components/ui/ControlsBar";
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { parseSalesFile } from "@/lib/parseSales";
 import {
@@ -662,64 +665,29 @@ export default function AnalyserPage() {
 
       <main className="max-w-6xl mx-auto px-6 py-10">
         {/* Upload Zone */}
-        <div
-          onDrop={onDrop}
-          onDragOver={(e) => e.preventDefault()}
-          className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-2xl bg-white dark:bg-slate-900 p-12 text-center hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
-        >
-          <div className="flex flex-col items-center gap-4">
-            <div className="bg-blue-50 dark:bg-blue-950/50 p-4 rounded-full">
-              <Upload className="text-blue-600 dark:text-blue-400" size={32} />
-            </div>
-            <div>
-              <p className="text-lg font-medium text-slate-900 dark:text-slate-100">{t.dropTitle}</p>
-              <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">{t.dropHint}</p>
-            </div>
-
-            <div className="mt-2 flex flex-wrap items-center justify-center gap-3">
-              <label className="cursor-pointer">
-                <span className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors">
-                  <FileSpreadsheet size={18} />
-                  {t.chooseFile}
-                </span>
-                <input
-                  type="file"
-                  accept=".csv,.xlsx,.xls"
-                  onChange={onFileChange}
-                  className="hidden"
-                />
-              </label>
-
-              <button
-                type="button"
-                onClick={async () => {
-                  setLoading(true);
-                  setError(null);
-                  try {
-                    const res = await fetch("/sample-sales-data.csv");
-                    const blob = await res.blob();
-                    const file = new File([blob], "sample-sales-data.csv", {
-                      type: "text/csv",
-                    });
-                    await handleFile(file);
-                  } catch {
-                    setError("Could not load sample data");
-                    setLoading(false);
-                  }
-                }}
-                className="inline-flex items-center gap-2 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 px-5 py-2.5 rounded-lg text-sm font-medium transition-colors"
-              >
-                Try sample data
-              </button>
-            </div>
-
-            {fileName && (
-              <p className="text-sm text-slate-600 dark:text-slate-400 mt-2">
-                {t.selected}: <span className="font-medium text-slate-800 dark:text-slate-200">{fileName}</span>
-              </p>
-            )}
-          </div>
-        </div>
+        <UploadZone
+          dropTitle={t.dropTitle}
+          dropHint={t.dropHint}
+          chooseFile={t.chooseFile}
+          selectedLabel={t.selected}
+          fileName={fileName}
+          onFile={handleFile}
+          onSample={async () => {
+            setLoading(true);
+            setError(null);
+            try {
+              const res = await fetch("/sample-sales-data.csv");
+              const blob = await res.blob();
+              const file = new File([blob], "sample-sales-data.csv", {
+                type: "text/csv",
+              });
+              await handleFile(file);
+            } catch {
+              setError("Could not load sample data");
+              setLoading(false);
+            }
+          }}
+        />
 
         {loading && (
           <div className="mt-10 text-center text-slate-600 dark:text-slate-400">{t.processing}</div>
@@ -734,147 +702,42 @@ export default function AnalyserPage() {
         {stats && !loading && (
           <div className="mt-12 space-y-10">
             {/* Controls */}
-           <div className="flex flex-wrap gap-6 items-end bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl px-6 py-5">
-              <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-slate-600 dark:text-slate-300 dark:text-slate-300">
-                  {t.dateRange}
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                   className="border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <span className="text-slate-400">→</span>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <button
-                    onClick={handleDateFilter}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
-                  >
-                    {t.apply}
-                  </button>
-                  {(startDate || endDate) && (
-                    <button
-                      onClick={clearDateFilter}
-                      className="text-slate-500 hover:text-slate-700 text-sm underline"
-                    >
-                      {t.clear}
-                    </button>
-                  )}
-                </div>
-                {stats.dateRange.min && (
-                  <p className="text-xs text-slate-400 mt-1">
-                    {t.dataSpans} {stats.dateRange.min} → {stats.dateRange.max}
-                  </p>
-                )}
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {[
-                    { id: "7d", label: lang === "fr" ? "7 jours" : "7 days" },
-                    { id: "30d", label: lang === "fr" ? "30 jours" : "30 days" },
-                    { id: "thisMonth", label: lang === "fr" ? "Ce mois" : "This month" },
-                    { id: "lastMonth", label: lang === "fr" ? "Mois dernier" : "Last month" },
-                    { id: "all", label: lang === "fr" ? "Tout" : "All time" },
-                  ].map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() =>
-                        setPreset(
-                          p.id as "7d" | "30d" | "thisMonth" | "lastMonth" | "all"
-                        )
-                      }
-                      className="text-xs px-2.5 py-1 rounded-full border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                  {t.topProducts}:
-                </label>
-                <select
-                  value={topN}
-                  onChange={(e) => setTopN(Number(e.target.value))}
-                  className="border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value={3}>Top 3</option>
-                  <option value={5}>Top 5</option>
-                  <option value={10}>Top 10</option>
-                </select>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                  {t.projection}:
-                </label>
-                <select
-                  value={projectionDays}
-                  onChange={(e) =>
-                    handleProjectionDaysChange(Number(e.target.value))
-                  }
-                  className="border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value={30}>30</option>
-                  <option value={60}>60</option>
-                  <option value={90}>90</option>
-                </select>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                  {t.method}:
-                </label>
-                <select
-                  value={projectionMethod}
-                  onChange={(e) =>
-                    handleMethodChange(e.target.value as ProjectionMethod)
-                  }
-                  className="border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="seasonal">{t.methodSeasonal}</option>
-                  <option value="trend">{t.methodTrend}</option>
-                  <option value="average">{t.methodAverage}</option>
-                </select>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                  {lang === "fr" ? "Produit" : "Product"}:
-                </label>
-                <select
-                  value={selectedProduct ?? ""}
-                  onChange={(e) => {
-                    const val = e.target.value || null;
-                    setSelectedProduct(val);
-                    reprocess(
-                      projectionDays,
-                      projectionMethod,
-                      startDate,
-                      endDate,
-                      val
-                    );
-                  }}
-                  className="border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[180px]"
-                >
-                  <option value="">
-                    {lang === "fr" ? "Tous" : "All products"}
-                  </option>
-                  {allProducts.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+            <ControlsBar
+              startDate={startDate}
+              endDate={endDate}
+              onStartDate={setStartDate}
+              onEndDate={setEndDate}
+              onApplyDates={handleDateFilter}
+              onClearDates={clearDateFilter}
+              dataSpansLabel={t.dataSpans}
+              dateMin={stats.dateRange.min}
+              dateMax={stats.dateRange.max}
+              onPreset={setPreset}
+              dateRangeLabel={t.dateRange}
+              applyLabel={t.apply}
+              clearLabel={t.clear}
+              topProductsLabel={t.topProducts}
+              projectionLabel={t.projection}
+              methodLabel={t.method}
+              productLabel={lang === "fr" ? "Produit" : "Product"}
+              allProductsLabel={lang === "fr" ? "Tous" : "All products"}
+              topN={topN}
+              onTopN={setTopN}
+              projectionDays={projectionDays}
+              onProjectionDays={handleProjectionDaysChange}
+              projectionMethod={projectionMethod}
+              onProjectionMethod={(m) => handleMethodChange(m as ProjectionMethod)}
+              methodSeasonal={t.methodSeasonal}
+              methodTrend={t.methodTrend}
+              methodAverage={t.methodAverage}
+              selectedProduct={selectedProduct}
+              onSelectedProduct={(val) => {
+                setSelectedProduct(val);
+                reprocess(projectionDays, projectionMethod, startDate, endDate, val);
+              }}
+              allProducts={allProducts}
+              lang={lang}
+            />
 
             {/* Core Revenue Metrics */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -1562,32 +1425,4 @@ export default function AnalyserPage() {
   );
 }
 
-function MetricCard({
-  title,
-  value,
-  icon,
-  color,
-}: {
-  title: string;
-  value: string;
-  icon: React.ReactNode;
-  color: string;
-}) {
-  const colorMap: Record<string, string> = {
-    blue: "bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400",
-    indigo: "bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400",
-    emerald: "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400",
-    rose: "bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400",
-    amber: "bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400",
-  };
 
-return (
-  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-5">
-    <div className="flex items-center justify-between mb-3">
-      <span className="text-sm text-slate-500 dark:text-slate-400 font-medium">{title}</span>
-      <div className={`p-2 rounded-lg ${colorMap[color]}`}>{icon}</div>
-    </div>
-    <p className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">{value}</p>
-  </div>
-);
-}
