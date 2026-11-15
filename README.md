@@ -1,4 +1,5 @@
 # Business Analyser
+**Live demo:** [https://business-analyser-eight.vercel.app](https://business-analyser-eight.vercel.app)
 
 Sales & e-commerce revenue analyser with cost/profit insights, multi-currency support, charts, date filters, and trend-based projections.
 
